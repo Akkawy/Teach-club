@@ -1,13 +1,35 @@
 // The app shell: routing, rendering and event wiring.
 //
 // A screen is { title, public?, guestOnly?, responsive?, load(ctx) -> state, view(state) -> html,
-// actions, inputs, changes }. Elements opt into handlers with data-action (click), data-submit
-// (form submit), data-input (typing) and data-change (file pickers, time inputs).
+// after(state)?, actions, inputs, changes }. Elements opt into handlers with data-action (click),
+// data-submit (form submit), data-input (typing) and data-change (file pickers, time inputs).
+// data-action="setLang" works on every screen.
 
 import { html } from './html.js';
 import { toast } from './ui.js';
+import { t, setLang } from './i18n.js';
 
-export const app = { me: null };
+// me: the logged-in member; club: their current club ({ id, name, role }) or null.
+export const app = { me: null, club: null };
+
+// Remembers an invite link opened before logging in, so joining happens right after.
+const INVITE_KEY = 'tc_invite';
+export function pendingInvite(code) {
+  try {
+    if (code === undefined) return localStorage.getItem(INVITE_KEY);
+    if (code) localStorage.setItem(INVITE_KEY, code);
+    else localStorage.removeItem(INVITE_KEY);
+  } catch {
+    // storage blocked
+  }
+  return null;
+}
+
+// Where to go right after logging in or signing up.
+export function afterAuth(fallback) {
+  const code = pendingInvite();
+  return code ? `/join/${code}` : fallback;
+}
 
 const wideQuery = window.matchMedia('(min-width: 900px)');
 export const isWide = () => wideQuery.matches;
@@ -18,12 +40,19 @@ let navToken = 0;
 const root = () => document.getElementById('app');
 
 const errorScreen = {
-  title: 'Oops',
+  title: () => t('common.oops'),
   view: (s) => html`<main class="screen pad-auth center-col">
-    <h1 class="display h-30">Hmm, that didn't work</h1>
+    <h1 class="display h-30">${t('common.oops')}</h1>
     <p class="lede">${s.message}</p>
-    <a class="btn btn-primary btn-md" href="/">Back to the calendar</a>
+    <a class="btn btn-primary btn-md" href="/">${t('common.backToCalendar')}</a>
   </main>`
+};
+
+const globalActions = {
+  setLang(state, el) {
+    setLang(el.dataset.lang);
+    render();
+  }
 };
 
 export function setRoutes(list) {
@@ -38,7 +67,11 @@ export function navigate(to, { replace = false } = {}) {
 
 export function render() {
   if (!current) return;
-  root().innerHTML = String(current.screen.view(current.state));
+  const { screen, state } = current;
+  const title = typeof screen.title === 'function' ? screen.title(state) : screen.title;
+  document.title = title ? `${title} · Teach Club` : 'Teach Club';
+  root().innerHTML = String(screen.view(state));
+  screen.after?.(state);
 }
 
 async function show(href, { scroll = true } = {}) {
@@ -56,9 +89,10 @@ async function show(href, { scroll = true } = {}) {
   const { screen, params } = found;
   if (!screen.public && !app.me) return navigate('/login?next=' + encodeURIComponent(url.pathname + url.search), { replace: true });
   if (screen.guestOnly && app.me) return navigate('/', { replace: true });
+  if (screen.needsClub && !app.club) return navigate('/clubs/start', { replace: true });
 
   const spinner = setTimeout(() => {
-    if (token === navToken) root().innerHTML = '<div class="loading" role="status"><span class="spinner"></span><span class="sr-only">Loading…</span></div>';
+    if (token === navToken) root().innerHTML = `<div class="loading" role="status"><span class="spinner"></span><span class="sr-only">${t('common.loading')}</span></div>`;
   }, 150);
   let state;
   let shown = screen;
@@ -70,6 +104,11 @@ async function show(href, { scroll = true } = {}) {
       clearTimeout(spinner);
       return navigate('/login', { replace: true });
     }
+    if (err.status === 412) {
+      app.club = null;
+      clearTimeout(spinner);
+      return navigate('/clubs/start', { replace: true });
+    }
     shown = errorScreen;
     state = { message: err.message };
   }
@@ -78,8 +117,6 @@ async function show(href, { scroll = true } = {}) {
   if (state.redirect) return navigate(state.redirect, { replace: true });
 
   current = { screen: shown, state };
-  const title = typeof shown.title === 'function' ? shown.title(state) : shown.title;
-  document.title = title ? `${title} · Teach Club` : 'Teach Club';
   render();
   if (scroll) window.scrollTo(0, 0);
 }
@@ -92,7 +129,7 @@ function run(fn, el, event) {
         app.me = null;
         navigate('/login', { replace: true });
       } else {
-        toast(err.message || 'Something went wrong.');
+        toast(err.message || t('common.somethingWrong'));
         render(); // puts back any button that was left in its busy state
       }
     });
@@ -104,7 +141,8 @@ export function start() {
   el.addEventListener('click', (e) => {
     const target = e.target.closest('[data-action]');
     if (target && el.contains(target) && current) {
-      const fn = current.screen.actions?.[target.dataset.action];
+      const name = target.dataset.action;
+      const fn = current.screen.actions?.[name] || globalActions[name];
       if (fn) {
         e.preventDefault();
         if (!target.disabled) run(fn, target, e);

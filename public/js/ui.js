@@ -1,7 +1,8 @@
-// Shared bits of UI: icons, avatars, the logo, pills, the bottom nav and the toast.
+// Shared bits of UI: icons, avatars, the logo, pills, the bottom nav, the language switch and the toast.
 
 import { html, raw } from './html.js';
-import { FORMATS } from './formats.js';
+import { fmt } from './formats.js';
+import { t, lang } from './i18n.js';
 
 const PATHS = {
   chevronLeft: '<path d="M15 6l-6 6 6 6"/>',
@@ -29,11 +30,32 @@ const PATHS = {
   screen: '<rect x="3" y="4" width="18" height="13" rx="3"/><path d="M10 8.5v5l4-2.5z"/><path d="M8 21h8"/>',
   bubbles: '<path d="M3 6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H8l-5 3.5V6z"/><path d="M19 9h.5a1.5 1.5 0 0 1 1.5 1.5V20l-3-2.5h-6a2 2 0 0 1-2-2"/>',
   book: '<path d="M3 5.5C5.5 4 9 4 12 6c3-2 6.5-2 9-.5V19c-2.5-1.5-6-1.5-9 .5-3-2-6.5-2-9-.5z"/><path d="M12 6v13.5"/>',
-  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.8 3.1 2.6 3.5 5.2"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  sparkle: '<path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  play: '<path d="M7 5v14l12-7z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  skip: '<path d="M6 5v14l9-7z"/><path d="M18 5v14"/>',
+  back: '<path d="M18 5v14l-9-7z"/><path d="M6 5v14"/>',
+  calendarPlus: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 9"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8M9.5 17h5"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/>',
+  door: '<path d="M14 3H6v18h8M14 3l6 2v14l-6 2zM11 12h.01"/>'
 };
 
+// Arrows mirror in Arabic so "back" still points the way you came.
+const MIRROR = new Set(['chevronLeft', 'chevronRight', 'skip', 'back', 'play']);
+
 export function icon(name, size = 20, width = 2) {
-  return raw(`<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`);
+  const cls = MIRROR.has(name) ? 'i mirror' : 'i';
+  return raw(`<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`);
 }
 
 export const PALETTE = [
@@ -63,25 +85,59 @@ export function logoMark(size = 36) {
   return raw(`<span class="logo-mark" style="width:${size}px;height:${size}px"><svg width="${inner}" height="${inner}" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5" fill="#FFFFFF"/><circle cx="15" cy="12" r="5" fill="none" stroke="#FFFFFF" stroke-width="2"/></svg></span>`);
 }
 
-export const brand = () => html`<span class="brand">${logoMark()}<span class="brand-name display">Teach Club</span></span>`;
+export const brand = () => html`<span class="brand">${logoMark()}<span class="brand-name display" dir="ltr">Teach Club</span></span>`;
 
 export function formatPill(key, { onHero = false } = {}) {
-  const f = FORMATS[key];
+  const f = fmt(key);
   return html`<span class="pill" style="background:${onHero ? '#FFFFFF' : f.bg};color:${f.fg}">${icon(f.icon, 14, 2.2)}${f.label}</span>`;
 }
 
 export function dotPill(key) {
-  const f = FORMATS[key];
+  const f = fmt(key);
   return html`<span class="pill" style="background:${f.bg};color:${f.fg}"><span class="dot" style="background:${f.dot}"></span>${f.label}</span>`;
 }
 
 export function bottomNav(active) {
   const item = (key, href, ic, label) => html`<a href="${href}" class="nav-item ${active === key ? 'on' : ''}" ${active === key ? raw('aria-current="page"') : ''}>${icon(ic, 24)}${label}</a>`;
-  return html`<nav class="bottom-nav" aria-label="Main">
-    ${item('calendar', '/', 'calendar', 'Calendar')}
-    <a href="/create/new" class="nav-fab" aria-label="Teach something">${icon('plus', 26, 2.4)}</a>
-    ${item('profile', '/profile', 'user', 'Profile')}
+  return html`<nav class="bottom-nav" aria-label="${t('nav.main')}">
+    ${item('calendar', '/', 'calendar', t('nav.calendar'))}
+    ${item('wishes', '/wishes', 'sparkle', t('nav.wishes'))}
+    <a href="/create/new" class="nav-fab" aria-label="${t('nav.teach')}">${icon('plus', 26, 2.4)}</a>
+    ${item('club', '/club', 'users', t('nav.club'))}
+    ${item('profile', '/profile', 'user', t('nav.profile'))}
   </nav>`;
+}
+
+// A small pill that switches to the other language. Handled by the "setLang" action in core.js.
+export function langToggle() {
+  const other = lang === 'ar' ? 'en' : 'ar';
+  const label = other === 'ar' ? 'العربية' : 'English';
+  return html`<button class="lang-toggle" data-action="setLang" data-lang="${other}" lang="${other}">${icon('globe', 18)}${label}</button>`;
+}
+
+// The same top bar on the desktop calendar, wishes and club pages.
+export function desktopHeader(active, me, extra = '') {
+  const link = (key, href, label) => html`<a href="${href}" class="${active === key ? 'on' : ''}" ${active === key ? raw('aria-current="page"') : ''}>${label}</a>`;
+  return html`<header class="dk-header">
+    <div class="dk-inner">
+      ${brand()}
+      <nav class="dk-nav" aria-label="${t('nav.main')}">
+        ${link('calendar', '/', t('nav.calendar'))}${link('wishes', '/wishes', t('nav.wishes'))}${link('club', '/club', t('nav.club'))}${link('profile', '/profile', t('nav.myLessons'))}
+      </nav>
+      <div class="dk-right">
+        ${extra}
+        ${langToggle()}
+        <a class="btn btn-primary btn-sm" href="/create/new">${icon('plus', 20, 2.4)}${t('nav.teach')}</a>
+        <a href="/profile" class="me-link" aria-label="${t('nav.yourProfile')}">${avatar(me, 44, { font: 15 })}</a>
+      </div>
+    </div>
+  </header>`;
+}
+
+// Turns plain text into safe html with clickable https links (for recaps and answers).
+export function linkify(text) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s<>"']+)/g);
+  return html`${parts.map((p, i) => (i % 2 ? html`<a href="${p}" target="_blank" rel="noopener noreferrer" dir="ltr">${p}</a>` : p))}`;
 }
 
 export const isWebLink = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());

@@ -7,11 +7,24 @@
 
   // The website itself (HTML, CSS, JS) lives in ./public.
   // Any URL that isn't a real file falls back to index.html so the app's own router can handle it.
+  // Lesson and invite pages go through the server first so shared links get a preview card.
+  // (/__scheduled only exists in local testing, to run the reminder job on demand.)
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/lesson/*", "/join/*", "/__scheduled"]
+  },
+
+  // Reminder emails: Cloudflare runs the server's "scheduled" job every 15 minutes (free).
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  // Who emails come from and the app's address (used for links in reminder emails).
+  // The Resend key itself is a secret named RESEND_API_KEY, added in the Cloudflare dashboard
+  // (Settings → Variables and Secrets → type Secret), never in this file.
+  "vars": {
+    "MAIL_FROM": "Teach Club <noreply@club.kathib.sa>",
+    "APP_URL": "https://teach-club.abdullah-shawa.workers.dev"
   },
 
   // The database, created with `npx wrangler d1 create teach-club-db`.

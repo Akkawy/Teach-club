@@ -2,22 +2,16 @@
 // /create/new starts a draft (optionally ?date= or ?edit=<lesson id>), then /create/1 … /create/6.
 
 import { html, raw } from '../html.js';
-import { api } from '../api.js';
+import { api, browserTz } from '../api.js';
 import { app, navigate, render } from '../core.js';
-import { FORMATS, ORDER, suggestPlan } from '../formats.js';
+import { fmt, ORDER, suggestPlan } from '../formats.js';
+import { t, tp, lang } from '../i18n.js';
 import { avatar, icon, formatPill, toast, busy, isWebLink } from '../ui.js';
-import { WD_SHORT, parse, isDate, today, addDays, daysBetween, weekdayIndex, fmtTime, shortDate, longDay, rangeLabel } from '../dates.js';
+import { parse, isDate, today, addDays, daysBetween, weekdayIndex, fmtTime, shortDate, longDay, rangeLabel, wdShort, minutes, minShort, localize, dayStartMs } from '../dates.js';
 
 const KEY = 'tc_draft';
 const TIMES = ['12:30', '17:30', '18:00', '18:30', '19:00', '19:30'];
 const LENGTHS = [5, 10, 15, 20, 25, 30];
-const LENGTH_TIPS = { 5: 'A quick spark.', 10: 'One idea, done well.', 15: 'Room for an example.', 20: 'A proper little lesson.', 25: 'Time to try it together.', 30: 'Plenty of room.' };
-const OPENERS = [
-  { label: 'How I…', text: 'How I ' },
-  { label: 'The trick to…', text: 'The trick to ' },
-  { label: 'Why … matters', text: 'Why  matters', caret: 4 },
-  { label: 'Everything I know about…', text: 'Everything I know about ' }
-];
 
 function loadDraft() {
   try {
@@ -44,7 +38,7 @@ function clearDraft() {
 }
 
 function newDraft(date) {
-  return { editId: null, date, time: '19:00', length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '' };
+  return { editId: null, date, time: '19:00', tz: browserTz, length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '', wishId: null, parentId: null, origin: '' };
 }
 
 function answersOf(d) {
@@ -57,14 +51,14 @@ function ensurePlan(d) {
   return d.plan.mins;
 }
 
+// The outline that gets saved: part names in the author's language, plus their own answers.
 function buildPlan(d) {
-  const f = FORMATS[d.format];
+  const f = fmt(d.format);
   const mins = ensurePlan(d);
   const answers = answersOf(d);
   return f.plan.map(([name, hint], i) => {
     const from = f.descFrom[i];
-    const answer = from == null ? '' : String(answers[from] || '').trim();
-    return { name, hint, min: mins[i], desc: answer || hint };
+    return { name, hint, min: mins[i], desc: from == null ? '' : String(answers[from] || '').trim() };
   });
 }
 
@@ -73,13 +67,13 @@ function buildPlan(d) {
 function header(s, title, subtitle, extra = '') {
   const d = s.draft;
   const back = s.step > 1
-    ? html`<a class="icon-btn" href="/create/${s.step - 1}" aria-label="Back">${icon('chevronLeft', 20, 2.2)}</a>`
-    : html`<button class="icon-btn" data-action="close" aria-label="Back">${icon('chevronLeft', 20, 2.2)}</button>`;
+    ? html`<a class="icon-btn" href="/create/${s.step - 1}" aria-label="${t('common.back')}">${icon('chevronLeft', 20, 2.2)}</a>`
+    : html`<button class="icon-btn" data-action="close" aria-label="${t('common.back')}">${icon('chevronLeft', 20, 2.2)}</button>`;
   return html`<header class="flow-head">
     <div class="flow-bar">
       ${back}
-      <span class="step-label">${d.editId ? 'Editing · ' : ''}Step ${s.step} of 6</span>
-      <button class="icon-btn" data-action="close" aria-label="Close">${icon('close', 18, 2.2)}</button>
+      <span class="step-label">${d.editId ? t('create.editing') : ''}${t('create.step', { n: s.step })}</span>
+      <button class="icon-btn" data-action="close" aria-label="${t('common.close')}">${icon('close', 18, 2.2)}</button>
     </div>
     <div class="progress" aria-hidden="true">${[1, 2, 3, 4, 5, 6].map((i) => html`<span class="${i <= s.step ? 'on' : ''}"></span>`)}</div>
     <div class="flow-title">
@@ -92,7 +86,7 @@ function header(s, title, subtitle, extra = '') {
 
 function footer(s, label, action = 'next') {
   return html`<footer class="flow-foot">
-    ${s.step > 1 ? html`<a class="btn btn-secondary back-btn" href="/create/${s.step - 1}">Back</a>` : ''}
+    ${s.step > 1 ? html`<a class="btn btn-secondary back-btn" href="/create/${s.step - 1}">${t('common.back')}</a>` : ''}
     <button class="btn btn-primary grow" data-action="${action}">${label}</button>
   </footer>`;
 }
@@ -102,11 +96,12 @@ function footer(s, label, action = 'next') {
 function dayNote(s) {
   const d = s.draft;
   const same = s.others.filter((l) => l.date === d.date);
-  if (!same.length) return 'Nothing else on that day yet. All yours.';
-  const names = [...new Set(same.map((l) => (l.host.id === app.me.id ? 'You' : l.host.firstName)))];
-  const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
-  const verb = names.length === 1 && names[0] !== 'You' ? 'is' : 'are';
-  return `${list} ${verb} teaching that day too. Cozy!`;
+  if (!same.length) return t('create.noneThatDay');
+  const names = [...new Set(same.map((l) => (l.host.id === app.me.id ? t('common.you') : l.host.firstName)))];
+  const comma = lang === 'ar' ? '، ' : ', ';
+  const list = names.length === 1 ? names[0] : names.slice(0, -1).join(comma) + t('common.and') + names[names.length - 1];
+  const one = names.length === 1 && names[0] !== t('common.you');
+  return t(one ? 'create.oneThatDay' : 'create.manyThatDay', { who: list });
 }
 
 function step1(s) {
@@ -115,22 +110,22 @@ function step1(s) {
   const custom = !TIMES.includes(d.time);
   return html`
 <div class="screen flow">
-  ${header(s, 'When works for you?', 'Pick a slot. You can always move it later.')}
+  ${header(s, t('create.s1'), t('create.s1sub'))}
   <main class="flow-main">
     <section class="card pad-16">
       <div class="row-between mb-12">
-        <h2 class="h-16">Day</h2>
+        <h2 class="h-16">${t('create.day')}</h2>
         <div class="week-nav">
-          <button class="mini-btn" data-action="week" data-dir="-1" aria-label="Earlier days" ${s.weekStart <= today() ? raw('disabled') : ''}>${icon('chevronLeft', 16, 2.4)}</button>
+          <button class="mini-btn" data-action="week" data-dir="-1" aria-label="${t('create.earlier')}" ${s.weekStart <= today() ? raw('disabled') : ''}>${icon('chevronLeft', 16, 2.4)}</button>
           <span class="small muted">${rangeLabel(days[0], days[6])}</span>
-          <button class="mini-btn" data-action="week" data-dir="1" aria-label="Later days">${icon('chevronRight', 16, 2.4)}</button>
+          <button class="mini-btn" data-action="week" data-dir="1" aria-label="${t('create.later')}">${icon('chevronRight', 16, 2.4)}</button>
         </div>
       </div>
       <div class="grid-7 gap-6">
         ${days.map((day) => {
           const on = day === d.date;
           return html`<button class="day-btn ${on ? 'on' : ''}" data-action="day" data-date="${day}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${longDay(day)}">
-            <span class="wd">${WD_SHORT[weekdayIndex(day)]}</span><span class="n">${parse(day).getDate()}</span>
+            <span class="wd">${wdShort(weekdayIndex(day))}</span><span class="n">${parse(day).getDate()}</span>
           </button>`;
         })}
       </div>
@@ -138,31 +133,31 @@ function step1(s) {
     </section>
 
     <section class="card pad-16">
-      <h2 class="h-16 mb-12">Start time</h2>
+      <h2 class="h-16 mb-12">${t('create.startTime')}</h2>
       <div class="grid-3 gap-8">
-        ${TIMES.map((t) => html`<button class="choice ${t === d.time ? 'on' : ''}" data-action="time" data-time="${t}" aria-pressed="${t === d.time ? 'true' : 'false'}">${fmtTime(t)}</button>`)}
+        ${TIMES.map((tm) => html`<button class="choice ${tm === d.time ? 'on' : ''}" data-action="time" data-time="${tm}" aria-pressed="${tm === d.time ? 'true' : 'false'}">${fmtTime(tm)}</button>`)}
       </div>
       <label class="custom-time ${custom ? 'on' : ''}">
-        <span class="small muted">Or another time</span>
-        <input class="input soft" type="time" step="300" value="${d.time}" data-change="customTime">
+        <span class="small muted">${t('create.otherTime')}</span>
+        <input class="input soft" type="time" step="300" dir="ltr" value="${d.time}" data-change="customTime">
       </label>
     </section>
 
     <section class="card pad-16">
       <div class="row-between baseline mb-12">
-        <h2 class="h-16">How long?</h2>
-        <span class="display len-big">${d.length} min</span>
+        <h2 class="h-16">${t('create.howLong')}</h2>
+        <span class="display len-big">${minutes(d.length)}</span>
       </div>
       <div class="grid-6 gap-6">
-        ${LENGTHS.map((n) => html`<button class="choice solid ${n === d.length ? 'on' : ''}" data-action="len" data-n="${n}" aria-pressed="${n === d.length ? 'true' : 'false'}" aria-label="${n} minutes">${n}</button>`)}
+        ${LENGTHS.map((n) => html`<button class="choice solid ${n === d.length ? 'on' : ''}" data-action="len" data-n="${n}" aria-pressed="${n === d.length ? 'true' : 'false'}" aria-label="${tp('minLong', n)}">${n}</button>`)}
       </div>
       <div class="tip-box">
         ${icon('clock', 20)}
-        <span><strong>${LENGTH_TIPS[d.length]}</strong> 30 minutes is the max. Short is the whole point.</span>
+        <span><strong>${t(`create.tips.${d.length}`)}</strong> ${t('create.tipTail')}</span>
       </div>
     </section>
   </main>
-  ${footer(s, 'Next: name it')}
+  ${footer(s, t('create.next1'))}
 </div>`;
 }
 
@@ -170,40 +165,42 @@ function step1(s) {
 
 function step2(s) {
   const d = s.draft;
+  const openers = t('create.openers');
   return html`
 <div class="screen flow">
-  ${header(s, "What's it called?", 'A title and one line to make friends curious.')}
+  ${header(s, t('create.s2'), t('create.s2sub'), d.origin ? html`<span class="pill pill-soft">${icon(d.wishId ? 'sparkle' : 'link', 14)}<bdi>${d.origin}</bdi></span>` : '')}
   <main class="flow-main">
     <section class="card pad-16 stack-16">
       <div class="field">
-        <label for="ttl" class="field-head">Title <span class="count" id="title-count">${d.title.length}/60</span></label>
-        <input id="ttl" class="input input-title" maxlength="60" value="${d.title}" data-input="title" placeholder="Keep it short and plain" autocomplete="off">
+        <label for="ttl" class="field-head">${t('create.fieldTitle')} <span class="count" id="title-count">${d.title.length}/60</span></label>
+        <input id="ttl" class="input input-title" maxlength="60" dir="auto" value="${d.title}" data-input="title" placeholder="${t('create.titlePh')}" autocomplete="off">
         <p class="form-error" id="title-error" role="alert" hidden></p>
         <div class="openers">
-          <span class="small muted">Stuck? Try</span>
-          ${OPENERS.map((o, i) => html`<button type="button" class="opener" data-action="opener" data-i="${i}">${o.label}</button>`)}
+          <button type="button" class="opener roulette" data-action="roulette">${icon('sparkle', 16)}${t('create.roulette')}</button>
+          <span class="small muted">${t('create.stuck')}</span>
+          ${openers.map((o, i) => html`<button type="button" class="opener" data-action="opener" data-i="${i}">${o.label}</button>`)}
         </div>
       </div>
       <div class="field">
-        <label for="pitch" class="field-head">One-line pitch <span class="count" id="pitch-count">${d.pitch.length}/90</span></label>
-        <textarea id="pitch" class="input" rows="2" maxlength="90" data-input="pitch" placeholder="Why should a friend come along?">${d.pitch}</textarea>
-        <span class="hint">Finish this: "You'll leave knowing…"</span>
+        <label for="pitch" class="field-head">${t('create.pitch')} <span class="count" id="pitch-count">${d.pitch.length}/90</span></label>
+        <textarea id="pitch" class="input" rows="2" maxlength="90" dir="auto" data-input="pitch" placeholder="${t('create.pitchPh')}">${d.pitch}</textarea>
+        <span class="hint">${t('create.pitchHint')}</span>
       </div>
     </section>
 
     <section class="stack-10">
-      <h2 class="eyebrow">Preview on the calendar</h2>
+      <h2 class="eyebrow">${t('create.preview')}</h2>
       <div class="card lesson-card">
-        <div class="lc-when"><span class="lc-time">${fmtTime(d.time)}</span><span class="small muted">${d.length} min</span></div>
+        <div class="lc-when"><span class="lc-time">${fmtTime(d.time)}</span><span class="small muted">${minutes(d.length)}</span></div>
         <div class="lc-body gap-6">
-          <span class="lc-title display" id="pv-title">${d.title || 'Your title'}</span>
-          <span class="small muted" id="pv-pitch">${d.pitch || 'Your one-line pitch'}</span>
-          <span class="who mt-4">${avatar(app.me, 28, { font: 11 })}You · ${shortDate(d.date)}</span>
+          <span class="lc-title display" id="pv-title">${d.title || t('create.yourTitle')}</span>
+          <span class="small muted" id="pv-pitch">${d.pitch || t('create.yourPitch')}</span>
+          <span class="who mt-4">${avatar(app.me, 28, { font: 11 })}${t('create.youOn', { date: shortDate(d.date) })}</span>
         </div>
       </div>
     </section>
   </main>
-  ${footer(s, 'Next: pick a format', 'nextFromTitle')}
+  ${footer(s, t('create.next2'), 'nextFromTitle')}
 </div>`;
 }
 
@@ -213,10 +210,10 @@ function step3(s) {
   const d = s.draft;
   return html`
 <div class="screen flow">
-  ${header(s, 'How do you want to share it?', 'Pick the one that feels most like you.')}
-  <main class="flow-main gap-10" role="radiogroup" aria-label="Lesson format">
+  ${header(s, t('create.s3'), t('create.s3sub'))}
+  <main class="flow-main gap-10" role="radiogroup" aria-label="${t('create.formatGroup')}">
     ${ORDER.map((k) => {
-      const f = FORMATS[k];
+      const f = fmt(k);
       const on = d.format === k;
       return html`<button class="format-card ${on ? 'on' : ''}" role="radio" aria-checked="${on ? 'true' : 'false'}" data-action="format" data-f="${k}">
         <span class="fc-art" style="background:${f.bg}">${raw(f.art)}</span>
@@ -227,9 +224,9 @@ function step3(s) {
         <span class="fc-radio">${on ? icon('check', 14, 3) : ''}</span>
       </button>`;
     })}
-    <p class="small muted center mt-6">Not sure? Talk is the easiest place to start.</p>
+    <p class="small muted center mt-6">${t('create.notSure')}</p>
   </main>
-  ${footer(s, 'Next: shape it')}
+  ${footer(s, t('create.next3'))}
 </div>`;
 }
 
@@ -242,12 +239,12 @@ function promptMark(f, i, value) {
 
 function step4(s) {
   const d = s.draft;
-  const f = FORMATS[d.format];
+  const f = fmt(d.format);
   const answers = answersOf(d);
-  const pill = html`<a class="pill pill-link" href="/create/3" style="background:${f.bg};color:${f.fg}"><span class="dot" style="background:${f.dot}"></span>${f.label} · change</a>`;
+  const pill = html`<a class="pill pill-link" href="/create/3" style="background:${f.bg};color:${f.fg}"><span class="dot" style="background:${f.dot}"></span>${t('create.change', { label: f.label })}</a>`;
   return html`
 <div class="screen flow">
-  ${header(s, f.heading, 'Three quick nudges. A few words each is plenty.', pill)}
+  ${header(s, f.heading, t('create.s4sub'), pill)}
   <main class="flow-main gap-12">
     ${f.prompts.map((p, i) => html`<div class="card pad-16 stack-10">
       <div class="prompt-head">
@@ -257,11 +254,11 @@ function step4(s) {
           <span class="small muted">${p.hint}</span>
         </span>
       </div>
-      <textarea id="ans-${i}" class="input soft" rows="${p.rows}" maxlength="500" data-input="answer" data-i="${i}" placeholder="${p.ph}">${answers[i] || ''}</textarea>
+      <textarea id="ans-${i}" class="input soft" rows="${p.rows}" maxlength="500" dir="auto" data-input="answer" data-i="${i}" placeholder="${p.ph}">${answers[i] || ''}</textarea>
     </div>`)}
-    <p class="small muted center row-center gap-8">${icon('heart', 18)}Skip anything. These are nudges, not homework.</p>
+    <p class="small muted center row-center gap-8">${icon('heart', 18)}${t('create.skipAny')}</p>
   </main>
-  ${footer(s, 'Next: time plan')}
+  ${footer(s, t('create.next4'))}
 </div>`;
 }
 
@@ -269,24 +266,22 @@ function step4(s) {
 
 function step5(s) {
   const d = s.draft;
-  const f = FORMATS[d.format];
+  const f = fmt(d.format);
   const mins = ensurePlan(d);
   const sum = mins.reduce((a, b) => a + b, 0);
   const diff = sum - d.length;
-  const status = diff === 0
-    ? 'Fits perfectly. Nice and relaxed.'
-    : diff > 0 ? `A little over: trim ${diff} min to fit.` : `${-diff} min spare. Room to breathe, or add it somewhere.`;
+  const status = diff === 0 ? t('create.fits') : diff > 0 ? t('create.over', { mins: minutes(diff) }) : t('create.spare', { mins: minutes(-diff) });
   return html`
 <div class="screen flow">
-  ${header(s, "Here's your time plan", `We split your ${d.length} minutes for a ${f.planLabel}. Nudge anything you like.`)}
+  ${header(s, t('create.s5'), t('create.s5sub', { len: tp('minLong', d.length), format: f.planLabel }))}
   <main class="flow-main gap-14">
     <section class="card pad-18-16">
       <div class="row-between baseline mb-12">
-        <span class="display plan-total">${sum}<span class="muted"> / ${d.length} min</span></span>
-        <button class="mini-pill" data-action="resetPlan">Reset</button>
+        <span class="display plan-total">${sum}<span class="muted"> / ${minutes(d.length)}</span></span>
+        <button class="mini-pill" data-action="resetPlan">${t('create.reset')}</button>
       </div>
       <div class="seg-bar" aria-hidden="true">${f.plan.map((_, i) => html`<span style="flex:${mins[i]} 1 0;background:${f.ramp[i]}"></span>`)}</div>
-      <div class="seg-labels" aria-hidden="true">${f.plan.map((_, i) => html`<span style="flex:${mins[i]} 1 0">${mins[i]}m</span>`)}</div>
+      <div class="seg-labels" aria-hidden="true">${f.plan.map((_, i) => html`<span style="flex:${mins[i]} 1 0">${minShort(mins[i])}</span>`)}</div>
       <p class="status ${diff > 0 ? 'over' : 'ok'}" role="status">${status}</p>
     </section>
 
@@ -295,14 +290,14 @@ function step5(s) {
         <span class="seg-swatch" style="background:${f.ramp[i]}"></span>
         <span class="grow stack-2"><strong>${name}</strong><span class="small muted">${hint}</span></span>
         <span class="stepper">
-          <button class="step-btn" data-action="dec" data-i="${i}" aria-label="Less time for ${name}" ${mins[i] <= 1 ? raw('disabled') : ''}>${icon('minus', 16, 2.6)}</button>
-          <span class="step-val">${mins[i]}m</span>
-          <button class="step-btn" data-action="inc" data-i="${i}" aria-label="More time for ${name}" ${mins[i] >= 30 ? raw('disabled') : ''}>${icon('plus', 16, 2.6)}</button>
+          <button class="step-btn" data-action="dec" data-i="${i}" aria-label="${t('create.less', { name })}" ${mins[i] <= 1 ? raw('disabled') : ''}>${icon('minus', 16, 2.6)}</button>
+          <span class="step-val">${minShort(mins[i])}</span>
+          <button class="step-btn" data-action="inc" data-i="${i}" aria-label="${t('create.more', { name })}" ${mins[i] >= 30 ? raw('disabled') : ''}>${icon('plus', 16, 2.6)}</button>
         </span>
       </li>`)}
     </ol>
   </main>
-  ${footer(s, 'Next: review')}
+  ${footer(s, t('create.next5'))}
 </div>`;
 }
 
@@ -313,16 +308,16 @@ function linkNote(d) {
   return html`
     <div class="note warn" id="link-none" role="note" ${has ? raw('hidden') : ''}>
       ${icon('bell', 20)}
-      <span><strong>No link yet, and that's okay.</strong> Friends will need it to join, so add it before the day.</span>
+      <span><strong>${t('create.noLink')}</strong> ${t('create.noLinkBody')}</span>
     </div>
     <div class="note ok" id="link-ok" ${has ? '' : raw('hidden')}>
-      ${icon('check', 18, 2.6)}Link added. Friends will see it once they RSVP.
+      ${icon('check', 18, 2.6)}${t('create.linkAdded')}
     </div>`;
 }
 
 function step6(s) {
   const d = s.draft;
-  const f = FORMATS[d.format];
+  const f = fmt(d.format);
   const plan = buildPlan(d);
   const visBtn = (value, ic, title, sub) => {
     const on = d.surprise === value;
@@ -333,54 +328,54 @@ function step6(s) {
   };
   return html`
 <div class="screen flow">
-  ${header(s, d.editId ? 'Looking good. Save it?' : 'Looks great. Ready?', d.editId ? 'Friends will see your changes right away.' : 'One last look before your friends can see it.')}
+  ${header(s, d.editId ? t('create.s6edit') : t('create.s6'), d.editId ? t('create.s6subEdit') : t('create.s6sub'))}
   <main class="flow-main gap-14">
     <section class="card pad-18 stack-12">
-      <div class="row-between">${formatPill(d.format)}<a href="/create/2" class="edit-link">Edit</a></div>
-      <h2 class="display h-23">${d.title || 'Untitled lesson'}</h2>
-      ${d.pitch ? html`<p class="body-2">${d.pitch}</p>` : ''}
+      <div class="row-between">${formatPill(d.format)}<a href="/create/2" class="edit-link">${t('common.edit')}</a></div>
+      <h2 class="display h-23"><bdi>${d.title || t('create.untitled')}</bdi></h2>
+      ${d.pitch ? html`<p class="body-2"><bdi>${d.pitch}</bdi></p>` : ''}
       <div class="grid-3 gap-8 mt-4">
-        <a class="fact" href="/create/1"><span class="tiny muted">Date</span><strong>${shortDate(d.date)}</strong></a>
-        <a class="fact" href="/create/1"><span class="tiny muted">Time</span><strong>${fmtTime(d.time)}</strong></a>
-        <a class="fact" href="/create/1"><span class="tiny muted">Length</span><strong>${d.length} min</strong></a>
+        <a class="fact" href="/create/1"><span class="tiny muted">${t('common.date')}</span><strong>${shortDate(d.date)}</strong></a>
+        <a class="fact" href="/create/1"><span class="tiny muted">${t('common.time')}</span><strong>${fmtTime(d.time)}</strong></a>
+        <a class="fact" href="/create/1"><span class="tiny muted">${t('common.length')}</span><strong>${minutes(d.length)}</strong></a>
       </div>
     </section>
 
     <section class="card pad-18 stack-8">
-      <label for="classlink" class="field-head big">Class link <span class="opt">Optional</span></label>
+      <label for="classlink" class="field-head big">${t('create.classLink')} <span class="opt">${t('common.optional')}</span></label>
       <div class="icon-input">
         ${icon('link', 20)}
-        <input id="classlink" class="input soft" type="url" inputmode="url" autocomplete="url" maxlength="500" value="${d.classLink}" data-input="link" placeholder="Paste your Zoom, Google Meet, or any video call link" aria-describedby="classlink-help">
+        <input id="classlink" class="input soft" type="url" inputmode="url" dir="ltr" autocomplete="url" maxlength="500" value="${d.classLink}" data-input="link" placeholder="${t('create.linkPh')}" aria-describedby="classlink-help">
       </div>
-      <span id="classlink-help" class="hint">You can add or change this later.</span>
+      <span id="classlink-help" class="hint">${t('create.linkHelp')}</span>
       ${linkNote(d)}
     </section>
 
     <section class="card pad-18 stack-12">
-      <div class="row-between"><h2 class="h-17">Your outline</h2><a href="/create/4" class="edit-link">Edit</a></div>
+      <div class="row-between"><h2 class="h-17">${t('create.outline')}</h2><a href="/create/4" class="edit-link">${t('common.edit')}</a></div>
       <div class="seg-bar thin" aria-hidden="true">${plan.map((p, i) => html`<span style="flex:${p.min} 1 0;background:${f.ramp[i]}"></span>`)}</div>
       <ol class="plain outline">
-        ${plan.map((p) => html`<li><span class="ol-min" style="color:${f.fg}">${p.min} min</span><span class="pre-line"><strong>${p.name}.</strong> ${p.desc}</span></li>`)}
+        ${plan.map((p) => html`<li><span class="ol-min" style="color:${f.fg}">${minutes(p.min)}</span><span class="pre-line" dir="auto"><strong>${p.name}.</strong> ${p.desc || p.hint}</span></li>`)}
       </ol>
     </section>
 
     <section class="card pad-18 stack-12">
-      <h2 class="h-17" id="vis">Who sees the outline?</h2>
+      <h2 class="h-17" id="vis">${t('create.whoSees')}</h2>
       <div class="grid-2 gap-8" role="radiogroup" aria-labelledby="vis">
-        ${visBtn(false, 'eye', 'Show it', 'Friends can peek ahead')}
-        ${visBtn(true, 'gift', 'Surprise', 'Keep it under wraps')}
+        ${visBtn(false, 'eye', t('create.showIt'), t('create.showItSub'))}
+        ${visBtn(true, 'gift', t('create.surprise'), t('create.surpriseSub'))}
       </div>
     </section>
 
     <section class="card pad-18 stack-8">
-      <label for="prep" class="field-head big">Anything to prep? <span class="opt">Optional</span></label>
-      <input id="prep" class="input soft" maxlength="200" value="${d.prep}" data-input="prep" placeholder="e.g. Bring a phone with a map app open">
-      <span class="hint">Something to read, bring or think about first.</span>
+      <label for="prep" class="field-head big">${t('create.prep')} <span class="opt">${t('common.optional')}</span></label>
+      <input id="prep" class="input soft" maxlength="200" dir="auto" value="${d.prep}" data-input="prep" placeholder="${t('create.prepPh')}">
+      <span class="hint">${t('create.prepHint')}</span>
     </section>
   </main>
   <footer class="flow-foot col">
-    <button class="btn btn-primary btn-xl shadow" data-action="publish">${icon('check', 20, 2.4)}${d.editId ? 'Save changes' : 'Publish to the calendar'}</button>
-    <span class="small muted center">You can edit or cancel any time. No pressure.</span>
+    <button class="btn btn-primary btn-xl shadow" data-action="publish">${icon('check', 20, 2.4)}${d.editId ? t('create.saveChanges') : t('create.publish')}</button>
+    <span class="small muted center">${t('create.noPressure')}</span>
   </footer>
 </div>`;
 }
@@ -388,12 +383,12 @@ function step6(s) {
 const STEPS = { 1: step1, 2: step2, 3: step3, 4: step4, 5: step5, 6: step6 };
 
 function draftFromLesson(l) {
-  const d = newDraft(l.date);
-  const f = FORMATS[l.format];
+  const f = fmt(l.format);
   return {
-    ...d,
+    ...newDraft(l.date),
     editId: l.id,
     time: l.time,
+    tz: l.tz || browserTz,
     length: l.length,
     title: l.title,
     pitch: l.pitch,
@@ -407,7 +402,8 @@ function draftFromLesson(l) {
 }
 
 export const create = {
-  title: (s) => (s.draft && s.draft.editId ? 'Edit lesson' : 'Teach something'),
+  title: (s) => (s.draft && s.draft.editId ? t('create.titleEdit') : t('create.titleNew')),
+  needsClub: true,
   async load({ params, query }) {
     const step = params[0];
     if (step === 'new') {
@@ -419,17 +415,31 @@ export const create = {
         return { redirect: '/create/6' };
       }
       const date = query.get('date');
-      saveDraft(newDraft(isDate(date) && date >= today() ? date : today()));
+      const draft = newDraft(isDate(date) && date >= today() ? date : today());
+      const wishId = query.get('wish');
+      const parentId = query.get('parent');
+      if (wishId) {
+        const { wish } = await api(`/wishes/${encodeURIComponent(wishId)}`);
+        Object.assign(draft, { title: wish.title.slice(0, 60), wishId: wish.id, origin: `${t('create.fromWish')}: ${wish.title}` });
+      } else if (parentId) {
+        const { lesson } = await api(`/lessons/${encodeURIComponent(parentId)}`);
+        if (lesson.isHost) {
+          const title = (lesson.title + t('create.partTwoSuffix')).slice(0, 60);
+          Object.assign(draft, { title, pitch: lesson.pitch, format: lesson.format, parentId: lesson.id, origin: t('lesson.partTwoOf', { title: lesson.title }) });
+        }
+      }
+      saveDraft(draft);
       return { redirect: '/create/1' };
     }
     const draft = loadDraft();
     if (!draft) return { redirect: '/create/new' };
     const s = { step: Number(step), draft, others: [] };
     if (s.step === 1) {
-      const t = today();
-      s.weekStart = draft.date < t ? draft.date : addDays(t, 7 * Math.floor(daysBetween(t, draft.date) / 7));
-      const { lessons } = await api(`/lessons?from=${draft.date < t ? draft.date : t}&to=${addDays(t, 180)}`);
-      s.others = lessons.filter((l) => l.id !== draft.editId);
+      const now = today();
+      s.weekStart = draft.date < now ? draft.date : addDays(now, 7 * Math.floor(daysBetween(now, draft.date) / 7));
+      const from = dayStartMs(draft.date < now ? draft.date : now);
+      const { lessons } = await api(`/lessons?from=${from}&to=${dayStartMs(addDays(now, 181))}`);
+      s.others = lessons.map(localize).filter((l) => l.id !== draft.editId);
     }
     return s;
   },
@@ -447,7 +457,7 @@ export const create = {
     nextFromTitle(s) {
       if (!s.draft.title.trim()) {
         const err = document.getElementById('title-error');
-        err.textContent = 'Give it a title first. A few plain words is perfect.';
+        err.textContent = t('create.titleErr');
         err.hidden = false;
         document.getElementById('ttl').focus();
         return;
@@ -475,8 +485,17 @@ export const create = {
       saveDraft(s.draft);
       render();
     },
+    roulette(s) {
+      const ideas = t('create.ideas');
+      let idea = ideas[Math.floor(Math.random() * ideas.length)];
+      if (idea === s.draft.title && ideas.length > 1) idea = ideas[(ideas.indexOf(idea) + 1) % ideas.length];
+      const input = document.getElementById('ttl');
+      input.value = idea;
+      create.inputs.title(s, input);
+      input.focus();
+    },
     opener(s, el) {
-      const o = OPENERS[Number(el.dataset.i)];
+      const o = t('create.openers')[Number(el.dataset.i)];
       const input = document.getElementById('ttl');
       input.value = o.text;
       create.inputs.title(s, input);
@@ -515,25 +534,26 @@ export const create = {
     async publish(s, button) {
       const d = s.draft;
       if (!d.title.trim()) {
-        toast('Give your lesson a title first.');
+        toast(t('create.needTitle'));
         return navigate('/create/2');
       }
       if (d.classLink.trim() && !isWebLink(d.classLink)) {
-        toast('Class links start with https:// — try copying it again.');
+        toast(t('create.badLink'));
         document.getElementById('classlink').focus();
         return;
       }
       const body = {
-        title: d.title, pitch: d.pitch, format: d.format, date: d.date, time: d.time, length: d.length,
+        title: d.title, pitch: d.pitch, format: d.format, date: d.date, time: d.time, tz: d.tz || browserTz, length: d.length,
+        wishId: d.wishId || undefined, parentId: d.parentId || undefined,
         answers: answersOf(d), plan: buildPlan(d), classLink: d.classLink.trim(), surprise: d.surprise, prep: d.prep
       };
-      busy(button, true, d.editId ? 'Saving…' : 'Publishing…');
+      busy(button, true, d.editId ? t('common.saving') : t('create.publishing'));
       try {
         const res = d.editId
           ? await api(`/lessons/${d.editId}`, { method: 'PUT', body })
           : await api('/lessons', { method: 'POST', body });
         clearDraft();
-        toast(d.editId ? 'Changes saved.' : "Published! It's on the calendar.");
+        toast(d.editId ? t('create.saved') : t('create.published'));
         navigate(`/lesson/${res.id}`, { replace: true });
       } catch (err) {
         busy(button, false);
@@ -546,14 +566,14 @@ export const create = {
       s.draft.title = el.value;
       saveDraft(s.draft);
       document.getElementById('title-count').textContent = `${el.value.length}/60`;
-      document.getElementById('pv-title').textContent = el.value || 'Your title';
+      document.getElementById('pv-title').textContent = el.value || t('create.yourTitle');
       if (el.value.trim()) document.getElementById('title-error').hidden = true;
     },
     pitch(s, el) {
       s.draft.pitch = el.value;
       saveDraft(s.draft);
       document.getElementById('pitch-count').textContent = `${el.value.length}/90`;
-      document.getElementById('pv-pitch').textContent = el.value || 'Your one-line pitch';
+      document.getElementById('pv-pitch').textContent = el.value || t('create.yourPitch');
     },
     answer(s, el) {
       const d = s.draft;
@@ -562,7 +582,7 @@ export const create = {
       list[i] = el.value;
       d.answers[d.format] = list;
       saveDraft(d);
-      document.getElementById(`mark-wrap-${i}`).innerHTML = String(promptMark(FORMATS[d.format], i, el.value));
+      document.getElementById(`mark-wrap-${i}`).innerHTML = String(promptMark(fmt(d.format), i, el.value));
     },
     link(s, el) {
       s.draft.classLink = el.value;

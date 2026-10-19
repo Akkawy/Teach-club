@@ -13,12 +13,13 @@ export class Safe {
 }
 
 export const raw = (s) => new Safe(String(s));
+export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
 function out(v) {
   if (v == null || v === false || v === true) return '';
   if (v instanceof Safe) return v.s;
   if (Array.isArray(v)) return v.map(out).join('');
-  return String(v).replace(/[&<>"']/g, (c) => ESC[c]);
+  return esc(v);
 }
 
 export function html(strings, ...values) {

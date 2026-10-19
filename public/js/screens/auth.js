@@ -2,93 +2,110 @@
 
 import { html, raw } from '../html.js';
 import { api } from '../api.js';
-import { app, navigate } from '../core.js';
-import { avatar, brand, icon, initialsOf, toast, busy, showError } from '../ui.js';
+import { app, navigate, render, afterAuth } from '../core.js';
+import { t, setLang } from '../i18n.js';
+import { avatar, brand, icon, initialsOf, toast, busy, showError, langToggle } from '../ui.js';
 import { resizePhoto } from '../photo.js';
+import { introSeen } from './intro.js';
 
 const safeNext = (v) => (v && v.startsWith('/') && !v.startsWith('//') ? v : '/');
 
+// First-time visitors see the walkthrough before logging in or signing up.
+function introFirst(path) {
+  return introSeen() ? null : { redirect: `/intro?then=${encodeURIComponent(path)}` };
+}
+
 export const login = {
-  title: 'Log in',
+  title: () => t('login.title'),
   public: true,
   guestOnly: true,
-  load: ({ query }) => ({ next: safeNext(query.get('next')) }),
+  load: ({ query }) => introFirst('/login' + (query.toString() ? '?' + query : '')) || { next: safeNext(query.get('next')) },
   view: () => html`
 <main class="screen pad-auth">
+  <div class="top-tools">${langToggle()}</div>
   <div class="auth-top">
     <div class="trio" aria-hidden="true">
-      <span class="trio-side" style="left:0;background:#D2F0E3;color:#11684F">${icon('heart', 26)}</span>
+      <span class="trio-side side-a" style="background:#D2F0E3;color:#11684F">${icon('heart', 26)}</span>
       <span class="trio-mid"><svg width="40" height="40" viewBox="0 0 24 24"><circle cx="9" cy="12" r="5" fill="#FFFFFF"/><circle cx="15" cy="12" r="5" fill="none" stroke="#FFFFFF" stroke-width="2"/></svg></span>
-      <span class="trio-side" style="right:0;background:#E4DCF8;color:#5232A3">${icon('bubbles', 26)}</span>
+      <span class="trio-side side-b" style="background:#E4DCF8;color:#5232A3">${icon('bubbles', 26)}</span>
     </div>
     <div class="center stack-8">
-      <h1 class="display h-34">Welcome back</h1>
-      <p class="lede">Good to see you. Your friends have been busy.</p>
+      <h1 class="display h-34">${t('login.heading')}</h1>
+      <p class="lede">${t('login.lede')}</p>
     </div>
   </div>
 
   <form class="form" data-submit="submit" novalidate>
     <p class="form-error" id="form-error" role="alert" hidden></p>
-    <label class="field">Email
-      <input class="input" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    <label class="field">${t('field.email')}
+      <input class="input" name="email" type="email" dir="ltr" autocomplete="email" placeholder="${t('field.emailPh')}" required>
     </label>
     <div class="field">
-      <div class="field-head"><label for="login-pw">Password</label><button type="button" class="text-btn" data-action="forgot">Forgot it?</button></div>
-      <input class="input" id="login-pw" name="password" type="password" autocomplete="current-password" placeholder="Your password" required>
+      <div class="field-head"><label for="login-pw">${t('field.password')}</label><button type="button" class="text-btn" data-action="forgot">${t('login.forgot')}</button></div>
+      <input class="input" id="login-pw" name="password" type="password" dir="ltr" autocomplete="current-password" placeholder="${t('login.passwordPh')}" required>
     </div>
-    <button class="btn btn-primary btn-lg mt-8" type="submit">Log in</button>
+    <button class="btn btn-primary btn-lg mt-8" type="submit">${t('login.submit')}</button>
   </form>
 
   <div class="card join-card">
-    <span class="muted">New here?</span>
-    <a class="btn btn-soft btn-md" href="/signup">Join the club</a>
+    <span class="muted">${t('login.newHere')}</span>
+    <a class="btn btn-soft btn-md" href="/signup">${t('login.join')}</a>
+    <a class="small strong" href="/intro?then=/login">${t('login.whatIs')}</a>
   </div>
 </main>`,
   actions: {
     async submit(s, form) {
       const data = Object.fromEntries(new FormData(form));
-      if (!data.email || !data.password) return showError('form-error', 'Enter your email and password.');
+      if (!data.email || !data.password) return showError('form-error', t('login.missing'));
       const button = form.querySelector('[type=submit]');
-      busy(button, true, 'Logging in…');
+      busy(button, true, t('login.busy'));
       try {
-        const { user } = await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
+        const { user, club } = await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
         app.me = user;
-        navigate(s.next, { replace: true });
+        app.club = club;
+        navigate(afterAuth(s.next), { replace: true });
       } catch (err) {
         busy(button, false);
         showError('form-error', err.message);
       }
     },
     forgot() {
-      toast("Password reset isn't available yet, sorry.");
+      const email = document.querySelector('input[name="email"]')?.value.trim() || '';
+      navigate('/forgot' + (email ? '?email=' + encodeURIComponent(email) : ''));
     }
   }
 };
 
 function photoSlot(s) {
   const pic = s.photo
-    ? html`<img class="avatar" src="${s.photo}" alt="Your profile photo preview" style="width:104px;height:104px">`
-    : html`<span class="avatar avatar-dashed display" id="initials" role="img" aria-label="Default avatar with your initials" style="width:104px;height:104px;background:#FBD9C4;color:#8A3510;font-size:38px">${initialsOf(s.name)}</span>`;
-  return html`${pic}<button type="button" class="cam-btn" data-action="pickPhoto" aria-label="${s.photo ? 'Change your profile photo' : 'Upload a profile photo'}">${icon('camera', 18, 2.2)}</button>`;
+    ? html`<img class="avatar" src="${s.photo}" alt="${t('signup.previewAlt')}" style="width:104px;height:104px">`
+    : html`<span class="avatar avatar-dashed display" id="initials" role="img" aria-label="${t('signup.initialsAlt')}" style="width:104px;height:104px;background:#FBD9C4;color:#8A3510;font-size:38px">${initialsOf(s.name)}</span>`;
+  return html`${pic}<button type="button" class="cam-btn" data-action="pickPhoto" aria-label="${s.photo ? t('signup.change') : t('signup.upload')}">${icon('camera', 18, 2.2)}</button>`;
 }
 
 function photoText(s) {
   return s.photo
-    ? { title: 'Looking good!', hint: 'Tap the camera to change it.' }
-    : { title: 'Add a photo', hint: "Totally optional. Skip it and we'll use your initials." };
+    ? { title: t('signup.photoGood'), hint: t('signup.photoGoodHint') }
+    : { title: t('signup.addPhoto'), hint: t('signup.addPhotoHint') };
+}
+
+// Keeps what's been typed when the language is switched mid-form.
+function remember(s) {
+  const form = document.querySelector('form[data-submit="submit"]');
+  if (form) s.typed = Object.fromEntries(new FormData(form));
 }
 
 export const signup = {
-  title: 'Join the club',
+  title: () => t('signup.title'),
   public: true,
   guestOnly: true,
-  load: () => ({ name: '', photo: null }),
+  load: () => introFirst('/signup') || { name: '', photo: null, typed: {} },
   view: (s) => html`
 <main class="screen pad-signup">
-  ${brand()}
+  <div class="row-between">${brand()}${langToggle()}</div>
   <div class="stack-8">
-    <h1 class="display h-34">Join the club</h1>
-    <p class="lede">Friends teaching friends, a few minutes at a time. No experts required.</p>
+    <h1 class="display h-34">${t('signup.title')}</h1>
+    <p class="lede">${t('signup.lede')}</p>
   </div>
 
   <div class="card photo-card">
@@ -102,28 +119,28 @@ export const signup = {
 
   <form class="form" data-submit="submit" novalidate>
     <p class="form-error" id="form-error" role="alert" hidden></p>
-    <label class="field">Your name
-      <input class="input" name="name" data-input="name" autocomplete="name" maxlength="60" placeholder="What friends call you" required>
+    <label class="field">${t('field.name')}
+      <input class="input" name="name" data-input="name" dir="auto" autocomplete="name" maxlength="60" placeholder="${t('field.namePh')}" value="${s.typed.name || ''}" required>
     </label>
-    <label class="field">Email
-      <input class="input" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    <label class="field">${t('field.email')}
+      <input class="input" name="email" type="email" dir="ltr" autocomplete="email" placeholder="${t('field.emailPh')}" value="${s.typed.email || ''}" required>
     </label>
     <div class="field">
-      <label for="su-pw">Password</label>
+      <label for="su-pw">${t('field.password')}</label>
       <div class="pw-wrap">
-        <input class="input pw-input" id="su-pw" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
-        <button type="button" class="pw-toggle" data-action="togglePw" aria-controls="su-pw">Show</button>
+        <input class="input pw-input" id="su-pw" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" placeholder="${t('signup.passwordPh')}" value="${s.typed.password || ''}" required>
+        <button type="button" class="pw-toggle" data-action="togglePw" aria-controls="su-pw">${t('signup.show')}</button>
       </div>
     </div>
     <label class="field">
-      <span class="field-head">What are you good at? <span class="opt">Optional</span></span>
-      <textarea class="input" name="bio" rows="3" maxlength="160" placeholder="Baking bread, chess openings, fixing bikes, bad puns…"></textarea>
-      <span class="hint">A line or two is perfect. It helps friends know what to ask you about.</span>
+      <span class="field-head">${t('field.bio')} <span class="opt">${t('common.optional')}</span></span>
+      <textarea class="input" name="bio" rows="3" maxlength="160" dir="auto" placeholder="${t('field.bioPh')}">${s.typed.bio || ''}</textarea>
+      <span class="hint">${t('signup.bioHint')}</span>
     </label>
-    <button class="btn btn-primary btn-lg mt-6" type="submit">Create my account</button>
+    <button class="btn btn-primary btn-lg mt-6" type="submit">${t('signup.submit')}</button>
   </form>
 
-  <p class="center muted">Already a member? <a href="/login" class="strong">Log in</a></p>
+  <p class="center muted">${t('signup.already')} <a href="/login" class="strong">${t('signup.login')}</a></p>
 </main>`,
   inputs: {
     name(s, el) {
@@ -148,6 +165,11 @@ export const signup = {
     }
   },
   actions: {
+    setLang(s, el) {
+      remember(s);
+      setLang(el.dataset.lang);
+      render();
+    },
     pickPhoto() {
       document.getElementById('photo-file').click();
     },
@@ -155,22 +177,23 @@ export const signup = {
       const input = document.getElementById('su-pw');
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      button.textContent = show ? 'Hide' : 'Show';
+      button.textContent = show ? t('signup.hide') : t('signup.show');
     },
     async submit(s, form) {
       const data = Object.fromEntries(new FormData(form));
-      if (!String(data.name || '').trim()) return showError('form-error', 'Tell us what friends call you.');
-      if (!data.email) return showError('form-error', 'Add your email so you can log in later.');
-      if (String(data.password || '').length < 8) return showError('form-error', 'Your password needs at least 8 characters.');
+      if (!String(data.name || '').trim()) return showError('form-error', t('signup.errName'));
+      if (!data.email) return showError('form-error', t('signup.errEmail'));
+      if (String(data.password || '').length < 8) return showError('form-error', t('signup.errPw'));
       const button = form.querySelector('[type=submit]');
-      busy(button, true, 'Creating your account…');
+      busy(button, true, t('signup.busy'));
       try {
         const { user } = await api('/signup', {
           method: 'POST',
           body: { name: data.name, email: data.email, password: data.password, bio: data.bio, photo: s.photo }
         });
         app.me = user;
-        navigate('/welcome', { replace: true });
+        app.club = null;
+        navigate(afterAuth('/welcome'), { replace: true });
       } catch (err) {
         busy(button, false);
         showError('form-error', err.message);
@@ -190,7 +213,7 @@ function welcomeItem(ic, title, text) {
 }
 
 export const welcome = {
-  title: 'Welcome',
+  title: () => t('welcome.title'),
   view: () => html`
 <main class="screen pad-auth gap-26">
   <div class="center-col stack-18 pt-12">
@@ -200,19 +223,19 @@ export const welcome = {
       ${sparkle(20, '#3A7BD5', 'right:-12px;top:0')}
       ${raw('<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="position:absolute;right:-18px;bottom:14px"><circle cx="12" cy="12" r="7" fill="#D24E7C"/></svg>')}
     </div>
-    <h1 class="display h-34">You're in, ${app.me.firstName}!</h1>
-    <p class="lede narrow">Here's the whole idea, in three easy bits.</p>
+    <h1 class="display h-34">${t('welcome.heading', { name: app.me.firstName })}</h1>
+    <p class="lede narrow">${t('welcome.lede')}</p>
   </div>
 
   <ol class="plain stack-12">
-    ${welcomeItem('clock', 'Lessons are short', "5 to 30 minutes. That's it, never longer.")}
-    ${welcomeItem('pencil', 'We help you plan', 'Pick a format, answer a few prompts, get a time plan.')}
-    ${welcomeItem('heart', 'Friends, not an audience', 'No slides, no grades. Just share what you love.')}
+    ${welcomeItem('clock', t('welcome.i1t'), t('welcome.i1b'))}
+    ${welcomeItem('pencil', t('welcome.i2t'), t('welcome.i2b'))}
+    ${welcomeItem('heart', t('welcome.i3t'), t('welcome.i3b'))}
   </ol>
 
   <div class="mt-auto stack-12">
-    <a class="btn btn-primary btn-lg" href="/">See what's coming up</a>
-    <a class="btn btn-secondary btn-lg" href="/create/new">I already have an idea</a>
+    <a class="btn btn-primary btn-lg" href="/">${t('welcome.see')}</a>
+    <a class="btn btn-secondary btn-lg" href="/create/new">${t('welcome.idea')}</a>
   </div>
 </main>`
 };

@@ -9,8 +9,9 @@ Anyone can sign up.
 | --- | --- |
 | `public/` | The website: the pages, styles and logo |
 | `public/manifest.webmanifest`, `public/sw.js`, `public/icons/` | What makes it installable as a phone app |
-| `src/worker.js` | The server: accounts, lessons, RSVPs, notes |
-| `migrations/0001_init.sql` | The database tables |
+| `src/` | The server: `worker.js` (routes), `accounts.js`, `clubs.js`, `lessons.js`, `wishes.js`, `reminders.js`, `email.js`, `previews.js`, `lib.js` |
+| `migrations/` | The database tables, one file per update (applied in order) |
+| `public/og/` | The pictures shown when a lesson or invite link is shared |
 | `wrangler.jsonc` | Cloudflare settings (app name, database link) |
 | `package.json` | The tool list (just Cloudflare's `wrangler`) |
 
@@ -34,7 +35,7 @@ Everything fits in Cloudflare's free plan.
 
 1. Go to <https://dash.cloudflare.com> → **Storage & Databases** → **D1 SQL Database** → **Create**.
 2. **Name:** `teach-club-db` → **Create**.
-3. Open the new database → **Console** tab. Open `migrations/0001_init.sql` from this folder, copy all of it, paste it into the console and click **Execute**.
+3. Open the new database → **Console** tab. Paste in each file from the `migrations` folder **in order** (`0001…`, then `0002…`, then `0003…`) and click **Execute** after each.
 4. Copy the **Database ID** shown at the top of the database page.
 5. In `wrangler.jsonc`, replace the value after `"database_id":` with that ID (keep the quotes). Upload the changed file to GitHub.
 
@@ -47,14 +48,15 @@ After this, every time you change something on GitHub, Cloudflare updates the li
 1. <https://dash.cloudflare.com> → **Workers & Pages** → click **teach-club**.
 2. **Settings** → **Build** → **Connect** (next to "Git repository").
 3. Choose **GitHub**, allow Cloudflare to see your `teach-club` repository, and pick it.
-4. **Branch:** `main`. **Build command:** leave empty. **Deploy command:** `npx wrangler deploy`.
+4. **Branch:** `main`. **Build command:** leave empty. **Deploy command:** `npx wrangler d1 migrations apply teach-club-db --remote && npx wrangler deploy`
+   (this also applies any new database update before each deploy).
 5. Click **Connect**. Then make any small change on GitHub (or click **Retry build**) to run the first deploy.
 
 **If you're starting on a fresh Cloudflare account:**
 
 1. <https://dash.cloudflare.com> → **Workers & Pages** → **Create** → **Import a repository**.
 2. Connect GitHub and pick the `teach-club` repository.
-3. **Project name:** `teach-club`. **Build command:** leave empty. **Deploy command:** `npx wrangler deploy`.
+3. **Project name:** `teach-club`. **Build command:** leave empty. **Deploy command:** `npx wrangler d1 migrations apply teach-club-db --remote && npx wrangler deploy`.
 4. Click **Create and deploy**. Do Step 2 first so the database exists.
 
 ## Step 4: Open your site
@@ -80,10 +82,34 @@ Updates arrive by themselves: deploy a change, and the app picks it up the next 
 
 ---
 
+## Languages and the welcome walkthrough
+
+- The app speaks **English and Arabic**. Arabic switches the whole layout to right-to-left.
+  - First visit: it picks the phone's language automatically.
+  - Switch any time: the language button on the walkthrough, log-in and sign-up screens, or **Edit profile → Language**. The choice is remembered on that device.
+  - All the app's words live in `public/js/strings.js`. To change any wording, edit it there (English under `en`, Arabic under `ar`).
+- First-time visitors see a 5-slide **welcome walkthrough** before logging in. Anyone can replay it from "What's Teach Club?" on the log-in page or in Edit profile.
+
+## Features
+
+- **Private clubs:** each club has its own calendar, wishlist and invite link. New members create a club or join one with a link. Club admins can rename the club, make a new invite link, make others admins, remove members, and handle reports.
+- **Reminder emails:** a day before and about 15 minutes before each lesson, to the teacher and everyone who said "I'm in". Runs every 15 minutes on Cloudflare (free). Members can turn them off in Edit profile. Capped at 90 emails a day to stay inside Resend's free plan.
+- **Free video rooms:** if a teacher doesn't add their own link, each lesson gets its own Jitsi room automatically.
+- **Add to calendar:** Google Calendar link, or an `.ics` file for Apple/Outlook (with a 15-minute alert).
+- **"Teach me…" wishlist:** ask for lessons, vote "me too", and tap "I'll teach this" to start a lesson from a wish.
+- **Presenter mode:** a big countdown that follows your time plan during the lesson and keeps the screen on.
+- **Questions before the lesson**, **after-lesson recap and photos** (up to 4), and **part two** follow-ups.
+- **Badges**, a yearly **Wrapped** recap, and a **"Surprise me"** topic button when creating a lesson.
+- **Time zones:** everyone sees lesson times on their own clock.
+- **Link previews** for shared lessons and invites (only the title, format and time, nothing private).
+- **Report** a lesson or member, **delete your account**, and a plain-language **privacy page**.
+
 ## Good to know
 
-- Lesson times are saved exactly as the teacher picks them, so it works best when members share a time zone.
-- "Forgot it?" on the log-in page doesn't reset passwords yet: that needs an email service.
+- Each lesson is saved with the teacher's time zone; everyone else sees it converted to their own.
+- "Forgot it?" emails a one-time reset link (valid 1 hour) through Resend, from `noreply@club.kathib.sa`.
+  It needs the secret `RESEND_API_KEY` in Cloudflare: **Workers & Pages → teach-club → Settings → Variables and Secrets → Add → Secret**.
+  Never put the key in a file or on GitHub.
 - Passwords are stored scrambled (hashed), never as plain text.
 
 ## For later: running it on your own computer

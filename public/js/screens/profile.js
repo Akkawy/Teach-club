@@ -1,11 +1,12 @@
 // Profiles (yours at /profile, a friend's at /u/:id) and editing your own.
 
-import { html } from '../html.js';
+import { html, raw } from '../html.js';
 import { api } from '../api.js';
 import { app, navigate, render } from '../core.js';
-import { FORMATS } from '../formats.js';
+import { fmt, reactionLabel } from '../formats.js';
+import { t, tp, th, lang, setLang } from '../i18n.js';
 import { avatar, icon, bottomNav, toast, busy, initialsOf } from '../ui.js';
-import { MON, parse, isOver, memberSince } from '../dates.js';
+import { monShort, parse, isOver, memberSince, minutes, localize } from '../dates.js';
 import { resizePhoto } from '../photo.js';
 import { isInstalled, isIOS, canPrompt, promptInstall, onInstallChange } from '../install.js';
 
@@ -15,60 +16,83 @@ onInstallChange(() => {
 
 function installCard() {
   if (isInstalled()) return '';
+  const b = (text) => html`<strong>${text}</strong>`;
   let how;
-  if (canPrompt()) how = html`<button class="btn btn-primary btn-sm self-start" data-action="install">Install the app</button>`;
-  else if (isIOS()) how = html`<span class="small muted">In Safari, tap ${icon('share', 16)} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>`;
-  else how = html`<span class="small muted">In your browser's menu, choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</span>`;
+  if (canPrompt()) how = html`<button class="btn btn-primary btn-sm self-start" data-action="install">${t('install.button')}</button>`;
+  else if (isIOS()) how = html`<span class="small muted">${th('install.ios', { icon: icon('share', 16), share: b(t('install.share')), add: b(t('install.add')) })}</span>`;
+  else how = html`<span class="small muted">${th('install.other', { install: b(t('install.installOpt')), add: b(t('install.addOpt')) })}</span>`;
   return html`<section class="card install-card mx-16 mt-20" id="install-card">
     <img src="/icons/icon-192.png" alt="" width="52" height="52">
     <div class="grow stack-6">
-      <strong>Get Teach Club on your phone</strong>
+      <strong>${t('install.title')}</strong>
       ${how}
     </div>
   </section>`;
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
 function lessonRow(l, meta) {
-  const f = FORMATS[l.format];
+  const f = fmt(l.format);
   const d = parse(l.date);
   return html`<a class="card lesson-row" href="/lesson/${l.id}">
     <span class="date-chip" style="background:${f.bg};color:${f.fg}">
-      <span class="mon">${MON[d.getMonth()]}</span><span class="display day">${d.getDate()}</span>
+      <span class="mon">${monShort(d.getMonth())}</span><span class="display day">${d.getDate()}</span>
     </span>
-    <span class="grow stack-4 min0"><strong class="lr-title">${l.title}</strong><span class="small muted">${f.label} · ${meta}</span></span>
+    <span class="grow stack-4 min0"><strong class="lr-title"><bdi>${l.title}</bdi></strong><span class="small muted">${f.label} · ${meta}</span></span>
     <span class="muted">${icon('chevronRight', 18, 2.2)}</span>
   </a>`;
 }
 
 function taughtMeta(l) {
-  if (!isOver(l)) return `Coming up · ${l.length} min`;
-  if (l.notesCount) return `${l.length} min · ${plural(l.notesCount, 'thank-you')}`;
-  return `${l.length} min · ${l.goingCount} went`;
+  const len = minutes(l.length);
+  if (!isOver(l)) return t('profile.metaComing', { len });
+  if (l.notesCount) return t('profile.metaThanks', { len, thanks: tp('thanks', l.notesCount) });
+  return t('profile.metaWent', { len, n: l.goingCount });
 }
 
 function attendedMeta(l) {
-  return `with ${l.host.id === app.me.id ? 'you' : l.host.firstName}${isOver(l) ? '' : ' · coming up'}`;
+  const name = l.host.id === app.me.id ? t('profile.withYou') : l.host.firstName;
+  return t('profile.metaWith', { name }) + (isOver(l) ? '' : t('profile.comingTail'));
 }
+
+function badgesCard(s) {
+  const earned = s.badges.filter((b) => b.earned);
+  const list = s.isMe ? s.badges : earned;
+  if (!list.length) return '';
+  return html`<section class="mx-16 mt-20 stack-10">
+    <h2 class="display h-19 pad-x-4 row-between">${t('badges.title')}<span class="small muted normal">${t('badges.count', { n: earned.length, total: s.badges.length })}</span></h2>
+    <ul class="plain badge-grid">${list.map((b) => {
+      const [name, how] = t(`badges.${b.key}`);
+      return html`<li class="badge ${b.earned ? 'on' : ''}" title="${how}">
+        <span class="badge-icon">${icon(BADGE_ICONS[b.key] || 'star', 22)}</span>
+        <strong>${name}</strong><span class="tiny muted">${how}</span>
+      </li>`;
+    })}</ul>
+  </section>`;
+}
+
+const BADGE_ICONS = {
+  first_lesson: 'star', five_lessons: 'trophy', all_formats: 'sparkle', regular: 'users', thanks_magnet: 'heart',
+  night_owl: 'clock', early_bird: 'clock', curious: 'bubbles', wish_granter: 'gift', sequel: 'link'
+};
 
 function stat(n, label) {
   return html`<div class="card stat"><strong class="display">${n}</strong><span class="small muted">${label}</span></div>`;
 }
 
 function noteFigure(n) {
-  const text = n.body || n.reactions.join(' · ');
   return html`<figure class="friend-note">
-    <blockquote>${n.body ? `“${text}”` : text}</blockquote>
-    <figcaption>${avatar(n.author, 26, { font: 10 })}${n.author.firstName}, on <a href="/lesson/${n.lesson.id}">${n.lesson.title}</a></figcaption>
+    <blockquote dir="auto">${n.body ? `“${n.body}”` : n.reactions.map(reactionLabel).join(' · ')}</blockquote>
+    <figcaption>${avatar(n.author, 26, { font: 10 })}${t('profile.noteOn', { name: n.author.firstName })} <a href="/lesson/${n.lesson.id}"><bdi>${n.lesson.title}</bdi></a></figcaption>
   </figure>`;
 }
 
 export const profile = {
-  title: (s) => (s.isMe ? 'Your profile' : s.user.name),
+  title: (s) => (s.isMe ? t('profile.yourProfile') : s.user.name),
   async load({ params }) {
     const id = params[0] ? Number(params[0]) : app.me.id;
     const data = await api(`/users/${id}`);
+    data.hosted.forEach(localize);
+    data.attended.forEach(localize);
     if (data.isMe) app.me = data.user;
     return { ...data, tab: 'taught' };
   },
@@ -79,45 +103,52 @@ export const profile = {
     const list = s.tab === 'taught' ? s.hosted : s.attended;
     const tab = (key, label) => html`<button role="tab" class="${s.tab === key ? 'on' : ''}" aria-selected="${s.tab === key ? 'true' : 'false'}" data-action="tab" data-tab="${key}">${label}</button>`;
     const empty = s.tab === 'taught'
-      ? html`<div class="empty-day"><span class="muted">${s.isMe ? "You haven't taught anything yet." : `${u.firstName} hasn't taught anything yet.`}</span>${s.isMe ? html`<a class="btn btn-soft btn-sm mt-4" href="/create/new">Teach something</a>` : ''}</div>`
-      : html`<div class="empty-day"><span class="muted">${s.isMe ? 'Lessons you RSVP to show up here.' : 'Nothing here yet.'}</span></div>`;
+      ? html`<div class="empty-day"><span class="muted">${s.isMe ? t('profile.emptyTaughtMe') : t('profile.emptyTaughtOther', { name: u.firstName })}</span>${s.isMe ? html`<a class="btn btn-soft btn-sm mt-4" href="/create/new">${t('nav.teach')}</a>` : ''}</div>`
+      : html`<div class="empty-day"><span class="muted">${s.isMe ? t('profile.emptyAttendMe') : t('profile.emptyAttendOther')}</span></div>`;
     return html`
 <div class="screen with-nav">
   <div class="profile-top ${s.isMe ? 'end' : ''}">
     ${s.isMe
-      ? html`<a class="pill-btn" href="/profile/edit">${icon('pencil', 18)}Edit profile</a>`
-      : html`<button class="icon-btn" data-action="back" aria-label="Back">${icon('chevronLeft', 20, 2.2)}</button>`}
+      ? html`<a class="pill-btn" href="/profile/edit">${icon('pencil', 18)}${t('profile.edit')}</a>`
+      : html`<button class="icon-btn" data-action="back" aria-label="${t('common.back')}">${icon('chevronLeft', 20, 2.2)}</button>
+        <a class="pill-btn" href="/report?user=${u.id}">${icon('flag', 16)}${t('profile.report')}</a>`}
   </div>
 
   <section class="profile-head">
     ${avatar(u, 120, { display: true, font: 44, cls: 'ring' })}
-    <h1 class="display h-30">${u.name}</h1>
+    <h1 class="display h-30"><bdi>${u.name}</bdi></h1>
     ${u.bio
-      ? html`<p class="bio">${u.bio}</p>`
-      : s.isMe ? html`<p class="bio muted">Add a line about what you're good at. <a href="/profile/edit">Edit profile</a></p>` : ''}
-    <span class="tiny muted">Member since ${memberSince(u.memberSince)}</span>
+      ? html`<p class="bio" dir="auto">${u.bio}</p>`
+      : s.isMe ? html`<p class="bio muted">${t('profile.addBio')} <a href="/profile/edit">${t('profile.edit')}</a></p>` : ''}
+    <span class="tiny muted">${t('profile.memberSince', { date: memberSince(u.memberSince) })}</span>
   </section>
 
-  <section class="stats" aria-label="Stats">
-    ${stat(taught, 'Taught')}
-    ${stat(attended, 'Attended')}
-    ${stat(s.thanksCount, 'Thank-yous')}
+  <section class="stats" aria-label="${t('profile.stats')}">
+    ${stat(taught, t('profile.taught'))}
+    ${stat(attended, t('profile.attended'))}
+    ${stat(s.thanksCount, t('profile.thanks'))}
   </section>
+
+  ${badgesCard(s)}
 
   ${s.isMe ? installCard() : ''}
 
+  ${s.isMe ? html`<a class="card wrapped-link mx-16 mt-20" href="/wrapped">
+    <span class="soft-square">${icon('trophy', 22)}</span><strong class="grow">${t('profile.wrapped', { year: new Date().getFullYear() })}</strong>${icon('chevronRight', 18, 2.2)}
+  </a>` : ''}
+
   <section class="mx-16 mt-20">
-    <div class="tabs" role="tablist" aria-label="Lessons">${tab('taught', 'Lessons taught')}${tab('attended', 'Attended')}</div>
+    <div class="tabs" role="tablist" aria-label="${t('profile.lessons')}">${tab('taught', t('profile.tabTaught'))}${tab('attended', t('profile.tabAttended'))}</div>
     <div role="tabpanel" class="stack-10 mt-12">
       ${list.length ? list.map((l) => lessonRow(l, s.tab === 'taught' ? taughtMeta(l) : attendedMeta(l))) : empty}
     </div>
   </section>
 
   <section class="mx-16 mt-22 stack-10">
-    <h2 class="display h-19 pad-x-4">Notes from friends</h2>
+    <h2 class="display h-19 pad-x-4">${t('profile.notes')}</h2>
     ${s.notes.length
       ? s.notes.map(noteFigure)
-      : html`<p class="empty-note">${s.isMe ? 'Thank-you notes from friends show up here after you teach.' : `No notes for ${u.firstName} yet.`}</p>`}
+      : html`<p class="empty-note">${s.isMe ? t('profile.noNotesMe') : t('profile.noNotesOther', { name: u.firstName })}</p>`}
   </section>
 
   ${bottomNav(s.isMe ? 'profile' : null)}
@@ -129,7 +160,7 @@ export const profile = {
       render();
     },
     async install() {
-      if (await promptInstall()) toast('Installed! Look for Teach Club on your home screen.');
+      if (await promptInstall()) toast(t('install.done'));
     },
     back() {
       if (history.length > 1) history.back();
@@ -148,14 +179,14 @@ function photoCard(s) {
   const u = { ...app.me, name, initials: initialsOf(name), photo: src };
   return html`
     <div class="photo-wrap big">
-      ${avatar(u, 128, { display: true, font: 46, alt: src ? 'Your profile photo' : 'Default avatar with your initials' })}
+      ${avatar(u, 128, { display: true, font: 46, alt: src ? t('edit.photoAlt') : t('signup.initialsAlt') })}
       <span class="cam-btn badge" aria-hidden="true">${icon('camera', 18, 2.2)}</span>
     </div>
     <div class="row gap-8">
-      <button class="btn btn-soft btn-sm" data-action="pickPhoto">${src ? 'Change photo' : 'Add a photo'}</button>
-      ${src ? html`<button class="btn btn-secondary btn-sm" data-action="removePhoto">Remove</button>` : ''}
+      <button class="btn btn-soft btn-sm" data-action="pickPhoto">${src ? t('edit.change') : t('edit.add')}</button>
+      ${src ? html`<button class="btn btn-secondary btn-sm" data-action="removePhoto">${t('common.remove')}</button>` : ''}
     </div>
-    <span class="tiny muted center">${src ? 'Square photos work best. We crop to a circle.' : 'No photo? No problem. Your initials look great.'}</span>`;
+    <span class="tiny muted center">${src ? t('edit.photoHint') : t('edit.noPhotoHint')}</span>`;
 }
 
 function refreshPhoto(s) {
@@ -163,14 +194,14 @@ function refreshPhoto(s) {
 }
 
 export const editProfile = {
-  title: 'Edit profile',
-  load: () => ({ name: app.me.name, bio: app.me.bio, email: app.me.email, newPhoto: undefined }),
+  title: () => t('edit.title'),
+  load: () => ({ name: app.me.name, bio: app.me.bio, email: app.me.email, newPhoto: undefined, reminders: app.me.emailReminders !== false }),
   view: (s) => html`
 <div class="screen">
   <header class="edit-head">
-    <a href="/profile" class="text-link">Cancel</a>
-    <h1 class="display h-20">Edit profile</h1>
-    <button class="text-link strong accent" data-action="save">Save</button>
+    <a href="/profile" class="text-link">${t('common.cancel')}</a>
+    <h1 class="display h-20">${t('edit.title')}</h1>
+    <button class="text-link strong accent" data-action="save">${t('common.save')}</button>
   </header>
 
   <main class="stack-16 px-16">
@@ -178,22 +209,43 @@ export const editProfile = {
     <input type="file" id="photo-file" accept="image/*" data-change="photo" hidden>
 
     <section class="card pad-18 stack-16">
-      <label class="field strong">Name
-        <input class="input soft" data-input="name" value="${s.name}" autocomplete="name" maxlength="60">
+      <label class="field strong">${t('edit.name')}
+        <input class="input soft" data-input="name" dir="auto" value="${s.name}" autocomplete="name" maxlength="60">
       </label>
       <div class="field">
-        <label for="bio" class="field-head strong">What are you good at? <span class="count" id="bio-count">${s.bio.length}/160</span></label>
-        <textarea id="bio" class="input soft" rows="4" maxlength="160" data-input="bio">${s.bio}</textarea>
+        <label for="bio" class="field-head strong">${t('field.bio')} <span class="count" id="bio-count">${s.bio.length}/160</span></label>
+        <textarea id="bio" class="input soft" rows="4" maxlength="160" dir="auto" data-input="bio">${s.bio}</textarea>
       </div>
-      <label class="field strong">Email
-        <input class="input soft" type="email" data-input="email" value="${s.email}" autocomplete="email" placeholder="you@example.com">
+      <label class="field strong">${t('field.email')}
+        <input class="input soft" type="email" dir="ltr" data-input="email" value="${s.email}" autocomplete="email" placeholder="${t('field.emailPh')}">
       </label>
+    </section>
+
+    <section class="card pad-18 stack-12">
+      <h2 class="h-16" id="lang-label">${t('edit.language')}</h2>
+      <div class="tabs" role="radiogroup" aria-labelledby="lang-label">
+        <button role="radio" class="${lang === 'en' ? 'on' : ''}" aria-checked="${lang === 'en' ? 'true' : 'false'}" data-action="pickLang" data-lang="en" lang="en">English</button>
+        <button role="radio" class="${lang === 'ar' ? 'on' : ''}" aria-checked="${lang === 'ar' ? 'true' : 'false'}" data-action="pickLang" data-lang="ar" lang="ar">العربية</button>
+      </div>
+      <a class="small strong" href="/intro">${t('edit.about')}</a>
+    </section>
+
+    <section class="card pad-18 stack-12">
+      <label class="toggle-row">
+        <span class="grow stack-2"><strong>${t('edit.reminders')}</strong><span class="small muted">${t('edit.remindersHint')}</span></span>
+        <input type="checkbox" class="switch" data-input="reminders" ${s.reminders ? raw('checked') : ''}>
+      </label>
+    </section>
+
+    <section class="stack-8 pad-x-4">
+      <a class="small strong row gap-6" href="/privacy">${icon('shield', 16)}${t('edit.privacy')}</a>
+      <a class="small strong row gap-6 danger-link" href="/account/delete">${icon('trash', 16)}${t('edit.remove')}</a>
     </section>
   </main>
 
   <footer class="flow-foot col">
-    <button class="btn btn-primary btn-lg" data-action="save">Save changes</button>
-    <button class="btn btn-ghost" data-action="logout">Log out</button>
+    <button class="btn btn-primary btn-lg" data-action="save">${t('create.saveChanges')}</button>
+    <button class="btn btn-ghost" data-action="logout">${t('edit.logout')}</button>
   </footer>
 </div>`,
   inputs: {
@@ -207,6 +259,9 @@ export const editProfile = {
     },
     email(s, el) {
       s.email = el.value;
+    },
+    reminders(s, el) {
+      s.reminders = el.checked;
     }
   },
   changes: {
@@ -219,6 +274,10 @@ export const editProfile = {
     }
   },
   actions: {
+    pickLang(s, el) {
+      setLang(el.dataset.lang);
+      render();
+    },
     pickPhoto() {
       document.getElementById('photo-file').click();
     },
@@ -227,16 +286,17 @@ export const editProfile = {
       refreshPhoto(s);
     },
     async save(s, button) {
-      if (!s.name.trim()) return toast('Your name can’t be empty.');
-      busy(button, true, 'Saving…');
-      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto } });
+      if (!s.name.trim()) return toast(t('edit.nameEmpty'));
+      busy(button, true, t('common.saving'));
+      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto, emailReminders: s.reminders } });
       app.me = user;
-      toast('Profile saved.');
+      toast(t('edit.saved'));
       navigate('/profile', { replace: true });
     },
     async logout() {
       await api('/logout', { method: 'POST' });
       app.me = null;
+      app.club = null;
       try {
         sessionStorage.clear();
       } catch {
