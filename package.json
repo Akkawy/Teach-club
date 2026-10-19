@@ -1,0 +1,14 @@
+{
+  "name": "teach-club",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply teach-club-db --local",
+    "db:remote": "wrangler d1 migrations apply teach-club-db --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.40.0"
+  }
+}
