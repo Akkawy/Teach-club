@@ -8,6 +8,7 @@ Anyone can sign up.
 | Folder / file | What it is |
 | --- | --- |
 | `public/` | The website: the pages, styles and logo |
+| `public/manifest.webmanifest`, `public/sw.js`, `public/icons/` | What makes it installable as a phone app |
 | `src/worker.js` | The server: accounts, lessons, RSVPs, notes |
 | `migrations/0001_init.sql` | The database tables |
 | `wrangler.jsonc` | Cloudflare settings (app name, database link) |
@@ -62,6 +63,16 @@ Your address is shown on the app's page in Cloudflare, like:
 **https://teach-club.abdullah-shawa.workers.dev**
 
 The first person to sign up is the first member.
+
+## Step 5: Install it as an app on your phone
+
+Teach Club is an installable web app: it gets its own home-screen icon and opens full-screen, without the browser bar.
+
+- **Android (Chrome):** open your site → tap **Install app** on your profile page, or ⋮ menu → **Install app**.
+- **iPhone (Safari):** open your site → tap **Share** → **Add to Home Screen** → **Add**.
+- **Computer (Chrome or Edge):** click the install icon at the right end of the address bar.
+
+Updates arrive by themselves: deploy a change, and the app picks it up the next time it's opened.
 
 ### Optional: your own domain
 

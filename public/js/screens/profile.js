@@ -7,6 +7,26 @@ import { FORMATS } from '../formats.js';
 import { avatar, icon, bottomNav, toast, busy, initialsOf } from '../ui.js';
 import { MON, parse, isOver, memberSince } from '../dates.js';
 import { resizePhoto } from '../photo.js';
+import { isInstalled, isIOS, canPrompt, promptInstall, onInstallChange } from '../install.js';
+
+onInstallChange(() => {
+  if (document.getElementById('install-card')) render();
+});
+
+function installCard() {
+  if (isInstalled()) return '';
+  let how;
+  if (canPrompt()) how = html`<button class="btn btn-primary btn-sm self-start" data-action="install">Install the app</button>`;
+  else if (isIOS()) how = html`<span class="small muted">In Safari, tap ${icon('share', 16)} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>`;
+  else how = html`<span class="small muted">In your browser's menu, choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</span>`;
+  return html`<section class="card install-card mx-16 mt-20" id="install-card">
+    <img src="/icons/icon-192.png" alt="" width="52" height="52">
+    <div class="grow stack-6">
+      <strong>Get Teach Club on your phone</strong>
+      ${how}
+    </div>
+  </section>`;
+}
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -84,6 +104,8 @@ export const profile = {
     ${stat(s.thanksCount, 'Thank-yous')}
   </section>
 
+  ${s.isMe ? installCard() : ''}
+
   <section class="mx-16 mt-20">
     <div class="tabs" role="tablist" aria-label="Lessons">${tab('taught', 'Lessons taught')}${tab('attended', 'Attended')}</div>
     <div role="tabpanel" class="stack-10 mt-12">
@@ -105,6 +127,9 @@ export const profile = {
     tab(s, el) {
       s.tab = el.dataset.tab;
       render();
+    },
+    async install() {
+      if (await promptInstall()) toast('Installed! Look for Teach Club on your home screen.');
     },
     back() {
       if (history.length > 1) history.back();
