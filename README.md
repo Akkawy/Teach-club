@@ -104,6 +104,23 @@ Updates arrive by themselves: deploy a change, and the app picks it up the next 
 - **Link previews** for shared lessons and invites (only the title, format and time, nothing private).
 - **Report** a lesson or member, **delete your account**, and a plain-language **privacy page**.
 
+### Safety, following and in-person lessons
+
+- **Community rules + 18+** are accepted at sign-up (`/rules`). Every lesson shows a "personal experience, not professional advice" note.
+- **Anti-bot check (Cloudflare Turnstile, free)** on sign-up and "Forgot it?". Set up once:
+  1. Cloudflare dashboard → **Turnstile** → **Add widget**. Name: `Teach Club`. Hostname: `teach-club.abdullah-shawa.workers.dev`. Mode: **Managed**. → **Create**.
+  2. Put the **Site key** in `wrangler.jsonc` → `TURNSTILE_SITE_KEY`.
+  3. Add the **Secret key** as a secret: **Workers & Pages → teach-club → Settings → Variables and Secrets → Add → type Secret**, name `TURNSTILE_SECRET`.
+- **Limits:** sign-ups, log-ins, password resets, lessons, questions, follows and reports are rate-limited. Accounts younger than 3 days can post 2 lessons a day and no links.
+- **Reports:** a lesson reported by 3 different people is hidden until an admin or the site owner reviews it.
+- **Site owner:** add a secret named `OWNER_EMAILS` with the email you log in with. You then get **Site owner tools** on the Club page (every report from every club, suspend accounts).
+- **Following (one-way):** follow anyone; turn on **Approve new followers** in Edit profile to review requests. **Block** cuts both ways.
+- **Who sees a lesson:** *My club* or *Club + followers*. People without a club can still follow teachers and join their follower lessons.
+- **In-person lessons:** place, area, map link and seats. The exact place and map are shown only to people who said "I'm in". Full lessons have a waitlist that moves up automatically.
+- **Teacher's private notes** per part of the plan, shown in presenter mode. **Material links** (slides, docs, videos) for people going, and everyone after the lesson.
+- **Archive** old lessons (only the teacher still sees them). **Topics** + interests power the **For you** row.
+- After sign-up, people get an **Add to home screen** step (with a warning when opened inside WhatsApp/Instagram-style browsers).
+
 ## Good to know
 
 - Each lesson is saved with the teacher's time zone; everyone else sees it converted to their own.

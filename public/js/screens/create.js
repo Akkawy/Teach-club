@@ -6,16 +6,19 @@ import { api, browserTz } from '../api.js';
 import { app, navigate, render } from '../core.js';
 import { fmt, ORDER, suggestPlan } from '../formats.js';
 import { t, tp, lang } from '../i18n.js';
-import { avatar, icon, formatPill, toast, busy, isWebLink } from '../ui.js';
+import { avatar, icon, formatPill, toast, busy, isWebLink, hostOf } from '../ui.js';
 import { parse, isDate, today, addDays, daysBetween, weekdayIndex, fmtTime, shortDate, longDay, rangeLabel, wdShort, minutes, minShort, localize, dayStartMs } from '../dates.js';
 
 const KEY = 'tc_draft';
 const TIMES = ['12:30', '17:30', '18:00', '18:30', '19:00', '19:30'];
+const SEATS = [0, 5, 10, 15, 20, 30];
+const TOPICS = ['cooking', 'tech', 'languages', 'art', 'music', 'science', 'sports', 'health', 'money', 'books', 'games', 'crafts', 'travel', 'career', 'history', 'nature'];
 const LENGTHS = [5, 10, 15, 20, 25, 30];
 
 function loadDraft() {
   try {
-    return JSON.parse(sessionStorage.getItem(KEY));
+    const d = JSON.parse(sessionStorage.getItem(KEY));
+    return d ? { ...newDraft(d.date), ...d } : null; // fills in fields added since the draft was saved
   } catch {
     return null;
   }
@@ -38,7 +41,8 @@ function clearDraft() {
 }
 
 function newDraft(date) {
-  return { editId: null, date, time: '19:00', tz: browserTz, length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '', wishId: null, parentId: null, origin: '' };
+  return { editId: null, date, time: '19:00', tz: browserTz, length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '', wishId: null, parentId: null, origin: '',
+    mode: 'online', place: '', area: '', mapLink: '', seats: 0, publicPlace: false, visibility: 'club', tags: [], teacherNotes: [], materials: [] };
 }
 
 function answersOf(d) {
@@ -156,9 +160,66 @@ function step1(s) {
         <span><strong>${t(`create.tips.${d.length}`)}</strong> ${t('create.tipTail')}</span>
       </div>
     </section>
+
+    ${whereSection(d)}
+    ${whoSection(d)}
   </main>
-  ${footer(s, t('create.next1'))}
+  ${footer(s, t('create.next1'), 'nextFromWhen')}
 </div>`;
+}
+
+// ---------- where & who (step 1), materials (step 6) ----------
+
+function whereSection(d) {
+  const mode = (k, ic) => html`<button class="choice ${d.mode === k ? 'on' : ''}" data-action="mode" data-mode="${k}" aria-pressed="${d.mode === k ? 'true' : 'false'}">${icon(ic, 16)} ${t(`where.${k}`)}</button>`;
+  return html`<section class="card pad-16 stack-12">
+    <h2 class="h-16">${t('where.title')}</h2>
+    <div class="grid-3 gap-8">${mode('online', 'video')}${mode('in_person', 'pin')}${mode('both', 'users')}</div>
+    ${d.mode === 'online' ? '' : html`
+      <p class="note warn small">${icon('shield', 18)}${t('where.safety')}</p>
+      <label class="field">${t('where.place')}<input class="input soft" maxlength="80" dir="auto" value="${d.place}" data-input="place" placeholder="${t('where.placePh')}"></label>
+      <label class="field">${t('where.area')}<input class="input soft" maxlength="60" dir="auto" value="${d.area}" data-input="area" placeholder="${t('where.areaPh')}"></label>
+      <span class="hint">${t('where.areaHint')}</span>
+      <label class="field">${t('where.map')}<input class="input soft" type="url" dir="ltr" maxlength="500" value="${d.mapLink}" data-input="mapLink" placeholder="${t('where.mapPh')}"></label>
+      <div class="field">
+        <span class="field-head">${t('where.seats')}</span>
+        <div class="grid-6 gap-6">${SEATS.map((n) => html`<button class="choice ${d.seats === n ? 'on' : ''}" data-action="seats" data-n="${n}" aria-pressed="${d.seats === n ? 'true' : 'false'}">${n ? n : '∞'}</button>`)}</div>
+        <span class="hint">${d.seats ? t('where.seatsHint') : t('where.noLimit')}</span>
+      </div>
+      <label class="check-row"><input type="checkbox" data-change="publicPlace" ${d.publicPlace ? raw('checked') : ''}><span>${t('where.public')}</span></label>
+      <p class="form-error" id="where-error" role="alert" hidden></p>`}
+  </section>`;
+}
+
+function whoSection(d) {
+  if (!app.club) return html`<p class="note small">${icon('users', 18)}${t('where.noClub')}</p>`;
+  const opt = (k, ic) => {
+    const on = d.visibility === k;
+    return html`<button class="vis-btn ${on ? 'on' : ''}" role="radio" aria-checked="${on ? 'true' : 'false'}" data-action="visibility" data-v="${k}">
+      <span class="row gap-6 strong">${icon(ic, 18)}${t(`where.${k}`)}</span><span class="small muted">${t(`where.${k}Sub`)}</span>
+    </button>`;
+  };
+  return html`<section class="card pad-16 stack-12">
+    <h2 class="h-16" id="who">${t('where.who')}</h2>
+    <div class="grid-2 gap-8" role="radiogroup" aria-labelledby="who">${opt('club', 'users')}${opt('followers', 'heart')}</div>
+  </section>`;
+}
+
+function materialsSection(d) {
+  return html`<section class="card pad-18 stack-10">
+    <h2 class="h-17 row gap-8">${icon('file', 20)}${t('where.materials')} <span class="opt">${t('common.optional')}</span></h2>
+    <span class="hint">${t('where.materialsHint')}</span>
+    ${d.materials.length ? html`<ul class="plain stack-8">${d.materials.map((m, i) => html`<li class="material-row">
+      ${icon('link', 16)}<span class="grow min0"><strong class="small"><bdi>${m.title || hostOf(m.url)}</bdi></strong><span class="tiny muted ellipsis" dir="ltr">${m.url}</span></span>
+      <button class="icon-btn small" data-action="removeMaterial" data-i="${i}" aria-label="${t('where.remove')}">${icon('close', 14, 2.6)}</button>
+    </li>`)}</ul>` : ''}
+    ${d.materials.length < 8 ? html`<div class="stack-8">
+      <input id="mat-url" class="input soft" type="url" dir="ltr" maxlength="500" placeholder="${t('where.urlPh')}" aria-label="${t('where.materials')}">
+      <input id="mat-title" class="input soft" maxlength="80" dir="auto" placeholder="${t('where.titlePh')}" aria-label="${t('where.titlePh')}">
+      <p class="form-error" id="mat-error" role="alert" hidden></p>
+      <button class="btn btn-secondary btn-sm self-start" data-action="addMaterial">${icon('plus', 16, 2.4)}${t('where.add')}</button>
+    </div>` : ''}
+  </section>`;
 }
 
 // ---------- step 2: title & pitch ----------
@@ -185,6 +246,11 @@ function step2(s) {
         <label for="pitch" class="field-head">${t('create.pitch')} <span class="count" id="pitch-count">${d.pitch.length}/90</span></label>
         <textarea id="pitch" class="input" rows="2" maxlength="90" dir="auto" data-input="pitch" placeholder="${t('create.pitchPh')}">${d.pitch}</textarea>
         <span class="hint">${t('create.pitchHint')}</span>
+      </div>
+      <div class="field">
+        <span class="field-head">${t('where.topics')} <span class="count">${d.tags.length}/3</span></span>
+        <div class="wrap gap-6">${TOPICS.map((k) => html`<button type="button" class="topic-chip ${d.tags.includes(k) ? 'on' : ''}" data-action="tag" data-tag="${k}" aria-pressed="${d.tags.includes(k) ? 'true' : 'false'}">${t(`topics.${k}`)}</button>`)}</div>
+        <span class="hint">${t('where.topicsHint')}</span>
       </div>
     </section>
 
@@ -294,6 +360,10 @@ function step5(s) {
           <span class="step-val">${minShort(mins[i])}</span>
           <button class="step-btn" data-action="inc" data-i="${i}" aria-label="${t('create.more', { name })}" ${mins[i] >= 30 ? raw('disabled') : ''}>${icon('plus', 16, 2.6)}</button>
         </span>
+        <details class="seg-notes" ${d.teacherNotes[i] ? raw('open') : ''}>
+          <summary>${icon('note', 16)}${t('where.notes')}</summary>
+          <textarea class="input soft" rows="4" maxlength="2000" dir="auto" data-input="teacherNote" data-i="${i}" placeholder="${t('where.notesPh')}" aria-label="${t('where.notes')}: ${name}">${d.teacherNotes[i] || ''}</textarea>
+        </details>
       </li>`)}
     </ol>
   </main>
@@ -339,9 +409,10 @@ function step6(s) {
         <a class="fact" href="/create/1"><span class="tiny muted">${t('common.time')}</span><strong>${fmtTime(d.time)}</strong></a>
         <a class="fact" href="/create/1"><span class="tiny muted">${t('common.length')}</span><strong>${minutes(d.length)}</strong></a>
       </div>
+      <a class="fact wide" href="/create/1"><span class="tiny muted">${t('where.label')}</span><strong>${icon(d.mode === 'online' ? 'video' : 'pin', 16)}<bdi>${d.mode === 'online' ? t('where.online') : `${d.place}, ${d.area}`}</bdi> · ${d.visibility === 'followers' || !app.club ? t('where.followers') : t('where.club')}</strong></a>
     </section>
 
-    <section class="card pad-18 stack-8">
+    ${d.mode === 'in_person' ? '' : html`<section class="card pad-18 stack-8">
       <label for="classlink" class="field-head big">${t('create.classLink')} <span class="opt">${t('common.optional')}</span></label>
       <div class="icon-input">
         ${icon('link', 20)}
@@ -349,7 +420,9 @@ function step6(s) {
       </div>
       <span id="classlink-help" class="hint">${t('create.linkHelp')}</span>
       ${linkNote(d)}
-    </section>
+    </section>`}
+
+    ${materialsSection(d)}
 
     <section class="card pad-18 stack-12">
       <div class="row-between"><h2 class="h-17">${t('create.outline')}</h2><a href="/create/4" class="edit-link">${t('common.edit')}</a></div>
@@ -395,15 +468,24 @@ function draftFromLesson(l) {
     format: l.format,
     answers: { [l.format]: l.answers || [] },
     plan: l.plan && l.plan.length === f.plan.length ? { key: `${l.format}:${l.length}`, mins: l.plan.map((p) => p.min) } : null,
-    classLink: l.classLink || '',
+    classLink: l.ownLink || '',
     surprise: !!l.surprise,
-    prep: l.prep || ''
+    prep: l.prep || '',
+    mode: l.mode || 'online',
+    place: l.place || '',
+    area: l.area || '',
+    mapLink: l.mapLink || '',
+    seats: l.seats || 0,
+    publicPlace: (l.mode || 'online') !== 'online',
+    visibility: l.visibility || 'club',
+    tags: l.tags || [],
+    teacherNotes: l.teacherNotes || [],
+    materials: l.materials || []
   };
 }
 
 export const create = {
   title: (s) => (s.draft && s.draft.editId ? t('create.titleEdit') : t('create.titleNew')),
-  needsClub: true,
   async load({ params, query }) {
     const step = params[0];
     if (step === 'new') {
@@ -485,6 +567,63 @@ export const create = {
       saveDraft(s.draft);
       render();
     },
+    nextFromWhen(s) {
+      const d = s.draft;
+      if (d.mode !== 'online') {
+        const err = document.getElementById('where-error');
+        const msg = !d.place.trim() || !d.area.trim() ? t('where.needPlace') : !d.publicPlace ? t('where.needPublic') : '';
+        if (msg) {
+          err.textContent = msg;
+          err.hidden = false;
+          err.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          return;
+        }
+      }
+      saveDraft(d);
+      navigate('/create/2');
+    },
+    mode(s, el) {
+      s.draft.mode = el.dataset.mode;
+      if (s.draft.mode !== 'online' && !s.draft.editId) s.draft.visibility = 'club'; // in-person defaults to club only
+      saveDraft(s.draft);
+      render();
+    },
+    seats(s, el) {
+      s.draft.seats = Number(el.dataset.n);
+      saveDraft(s.draft);
+      render();
+    },
+    visibility(s, el) {
+      s.draft.visibility = el.dataset.v;
+      saveDraft(s.draft);
+      render();
+    },
+    tag(s, el) {
+      const d = s.draft;
+      const k = el.dataset.tag;
+      if (d.tags.includes(k)) d.tags = d.tags.filter((x) => x !== k);
+      else if (d.tags.length < 3) d.tags = d.tags.concat(k);
+      saveDraft(d);
+      render();
+    },
+    addMaterial(s) {
+      const url = document.getElementById('mat-url').value.trim();
+      const title = document.getElementById('mat-title').value.trim();
+      const err = document.getElementById('mat-error');
+      if (!isWebLink(url)) {
+        err.textContent = t('where.badLink');
+        err.hidden = false;
+        return;
+      }
+      s.draft.materials = s.draft.materials.concat({ url, title });
+      saveDraft(s.draft);
+      render();
+    },
+    removeMaterial(s, el) {
+      s.draft.materials = s.draft.materials.filter((_, i) => i !== Number(el.dataset.i));
+      saveDraft(s.draft);
+      render();
+    },
     roulette(s) {
       const ideas = t('create.ideas');
       let idea = ideas[Math.floor(Math.random() * ideas.length)];
@@ -545,7 +684,10 @@ export const create = {
       const body = {
         title: d.title, pitch: d.pitch, format: d.format, date: d.date, time: d.time, tz: d.tz || browserTz, length: d.length,
         wishId: d.wishId || undefined, parentId: d.parentId || undefined,
-        answers: answersOf(d), plan: buildPlan(d), classLink: d.classLink.trim(), surprise: d.surprise, prep: d.prep
+        answers: answersOf(d), plan: buildPlan(d), classLink: d.mode === 'in_person' ? '' : d.classLink.trim(), surprise: d.surprise, prep: d.prep,
+        mode: d.mode, place: d.place, area: d.area, mapLink: d.mapLink, seats: d.seats, publicPlace: d.publicPlace,
+        visibility: app.club ? d.visibility : 'followers', tags: d.tags, materials: d.materials,
+        teacherNotes: fmt(d.format).plan.map((_, i) => d.teacherNotes[i] || '')
       };
       busy(button, true, d.editId ? t('common.saving') : t('create.publishing'));
       try {
@@ -562,6 +704,24 @@ export const create = {
     }
   },
   inputs: {
+    place(s, el) {
+      s.draft.place = el.value;
+      saveDraft(s.draft);
+    },
+    area(s, el) {
+      s.draft.area = el.value;
+      saveDraft(s.draft);
+    },
+    mapLink(s, el) {
+      s.draft.mapLink = el.value.trim();
+      saveDraft(s.draft);
+    },
+    teacherNote(s, el) {
+      const list = s.draft.teacherNotes.slice();
+      list[Number(el.dataset.i)] = el.value;
+      s.draft.teacherNotes = list;
+      saveDraft(s.draft);
+    },
     title(s, el) {
       s.draft.title = el.value;
       saveDraft(s.draft);
@@ -597,6 +757,12 @@ export const create = {
     }
   },
   changes: {
+    publicPlace(s, el) {
+      s.draft.publicPlace = el.checked;
+      saveDraft(s.draft);
+      const err = document.getElementById('where-error');
+      if (err && el.checked) err.hidden = true;
+    },
     customTime(s, el) {
       if (!/^\d{2}:\d{2}$/.test(el.value)) return;
       s.draft.time = el.value;

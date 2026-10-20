@@ -7,8 +7,9 @@ import { signup, login, logout, getMe, updateMe, deleteMe, forgot, resetPassword
 import { listClubs, createClub, switchClub, clubDetail, renameClub, newInvite, setRole, removeMember, invitePreview, joinByInvite, createReport, resolveReport } from './clubs.js';
 import {
   listLessons, getLesson, createLesson, updateLesson, deleteLesson, setRsvp, saveNote,
-  askQuestion, answerQuestion, deleteQuestion, saveRecap, addPhoto, getLessonPhoto, deletePhoto, wrapped
+  askQuestion, answerQuestion, deleteQuestion, saveRecap, addPhoto, getLessonPhoto, deletePhoto, wrapped, archiveLesson, forYou
 } from './lessons.js';
+import { follow, unfollow, listFollows, acceptFollower, removeFollower, block, unblock, ownerReports, setBanned } from './social.js';
 import { listWishes, createWish, getWish, voteWish, deleteWish } from './wishes.js';
 import { sendReminders } from './reminders.js';
 import { pageWithPreview } from './previews.js';
@@ -51,6 +52,7 @@ async function route(request, env, url) {
   if (a === 'forgot' && !b && is('POST')) return forgot(request, env, url);
   if (a === 'reset' && !b && is('POST')) return resetPassword(request, env);
   if (a === 'invites' && b && !c && is('GET')) return invitePreview(env, b);
+  if (a === 'config' && !b && is('GET')) return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null });
 
   const me = await currentUser(request, env);
   if (!me) throw new HttpError(401, 'Please log in first.');
@@ -61,9 +63,25 @@ async function route(request, env, url) {
     if (is('DELETE')) return deleteMe(request, env, me);
   }
   if (a === 'users' && isId(b)) {
-    if (!c && is('GET')) return getProfile(env, me, Number(b));
-    if (c === 'photo' && is('GET')) return getUserPhoto(env, me, Number(b));
+    const id = Number(b);
+    if (!c && is('GET')) return getProfile(env, me, id);
+    if (c === 'photo' && is('GET')) return getUserPhoto(env, me, id);
+    if (c === 'follow' && is('POST')) return follow(env, me, id);
+    if (c === 'follow' && is('DELETE')) return unfollow(env, me, id);
+    if (c === 'block' && is('POST')) return block(env, me, id);
+    if (c === 'block' && is('DELETE')) return unblock(env, me, id);
   }
+  if (a === 'follows') {
+    if (!b && is('GET')) return listFollows(env, me);
+    if (isId(b) && c === 'accept' && is('POST')) return acceptFollower(env, me, Number(b));
+    if (isId(b) && !c && is('DELETE')) return removeFollower(env, me, Number(b));
+  }
+  if (a === 'owner') {
+    if (b === 'reports' && !c && is('GET')) return ownerReports(env, me);
+    if (b === 'users' && isId(c) && d === 'ban' && is('POST')) return setBanned(env, me, Number(c), true);
+    if (b === 'users' && isId(c) && d === 'ban' && is('DELETE')) return setBanned(env, me, Number(c), false);
+  }
+  if (a === 'for-you' && !b && is('GET')) return forYou(env, me);
   if (a === 'invites' && b && c === 'join' && is('POST')) return joinByInvite(env, me, b);
 
   if (a === 'clubs') {
@@ -122,6 +140,7 @@ async function route(request, env, url) {
       if (c === 'note' && !d && is('PUT')) return saveNote(request, env, me, id);
       if (c === 'questions' && !d && is('POST')) return askQuestion(request, env, me, id);
       if (c === 'recap' && !d && is('PUT')) return saveRecap(request, env, me, id);
+      if (c === 'archive' && !d && is('PUT')) return archiveLesson(request, env, me, id);
       if (c === 'photos' && !d && is('POST')) return addPhoto(request, env, me, id);
       if (c === 'photos' && isId(d) && is('GET')) return getLessonPhoto(env, me, id, Number(d));
       if (c === 'photos' && isId(d) && is('DELETE')) return deletePhoto(env, me, id, Number(d));

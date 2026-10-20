@@ -88,14 +88,18 @@ export async function sendReminderEmail(env, { user, lesson, kind, isHost, callL
   if (ar) {
     subject = kind === 'soon' ? `يبدأ قريبًا: ${lesson.title}` : `غدًا: ${lesson.title}`;
     lines = isHost
-      ? [kind === 'soon' ? 'درسك يبدأ خلال دقائق. بالتوفيق!' : 'تذكير بأنك تقدّم درسًا غدًا.', `الموعد: ${when}`, `رابط المكالمة: ${callLink}`]
+      ? [kind === 'soon' ? 'درسك يبدأ خلال دقائق. بالتوفيق!' : 'تذكير بأنك تقدّم درسًا غدًا.', `الموعد: ${when}`]
       : [kind === 'soon' ? 'الدرس الذي أكدت حضوره يبدأ خلال دقائق.' : 'تذكير بالدرس الذي أكدت حضوره غدًا.', `الموعد: ${when}`];
+    if (lesson.place) lines.push(`المكان: ${lesson.place}`, ...(lesson.mapLink ? [`الخريطة: ${lesson.mapLink}`] : []));
+    if (isHost && callLink) lines.push(`رابط المكالمة: ${callLink}`);
     button = kind === 'soon' && callLink ? { label: 'انضم إلى المكالمة', href: callLink } : { label: 'عرض الدرس', href: lessonUrl };
   } else {
     subject = kind === 'soon' ? `Starting soon: ${lesson.title}` : `Tomorrow: ${lesson.title}`;
     lines = isHost
-      ? [kind === 'soon' ? 'Your lesson starts in a few minutes. Good luck!' : "Quick reminder: you're teaching tomorrow.", `When: ${when}`, `Call link: ${callLink}`]
+      ? [kind === 'soon' ? 'Your lesson starts in a few minutes. Good luck!' : "Quick reminder: you're teaching tomorrow.", `When: ${when}`]
       : [kind === 'soon' ? 'The lesson you said yes to starts in a few minutes.' : 'Quick reminder about the lesson you said yes to.', `When: ${when}`];
+    if (lesson.place) lines.push(`Where: ${lesson.place}`, ...(lesson.mapLink ? [`Map: ${lesson.mapLink}`] : []));
+    if (isHost && callLink) lines.push(`Call link: ${callLink}`);
     button = kind === 'soon' && callLink ? { label: 'Join the call', href: callLink } : { label: 'See the lesson', href: lessonUrl };
   }
   const small = ar ? ['لا تريد التذكيرات؟ أوقفها من «تعديل الملف»:', settings] : ["Don't want reminders? Turn them off in Edit profile:", settings];

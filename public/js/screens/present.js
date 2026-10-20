@@ -102,6 +102,7 @@ export const present = {
   <section class="present-main">
     <h1 class="display present-name" style="color:${f.fg}">${part.name}</h1>
     <p class="present-desc pre-line" dir="auto">${part.desc}</p>
+    ${s.l.teacherNotes && s.l.teacherNotes[s.i] ? html`<div class="present-notes"><span class="tiny strong">${icon('note', 14)}${t('presentMore.notes')}</span><p class="pre-line" dir="auto">${s.l.teacherNotes[s.i]}</p></div>` : ''}
     <div class="present-clock" id="present-clock" role="timer" aria-live="off">${clock(left(s))}</div>
     <span class="present-over" id="present-over" hidden>${t('present.overtime')}</span>
     <div class="present-bar"><span id="present-fill"></span></div>

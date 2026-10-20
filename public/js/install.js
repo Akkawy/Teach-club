@@ -31,6 +31,24 @@ export const isIOS = () =>
 
 export const canPrompt = () => !!deferred;
 
+// Browsers built into other apps (Instagram, Facebook, Snapchat, TikTok…) can't install web apps.
+export const isInAppBrowser = () =>
+  /Instagram|FBAN|FBAV|FB_IAB|Snapchat|Line\/|TikTok|musical_ly|Bytedance|Twitter|LinkedInApp|GSA\//i.test(navigator.userAgent);
+
+const flag = (key, value) => {
+  try {
+    if (value === undefined) return localStorage.getItem(key) === '1';
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    // storage blocked
+  }
+  return false;
+};
+// Whether the "add to home screen" step was already shown, and whether the home banner was dismissed.
+export const installStepSeen = (v) => flag('tc_install_seen', v);
+export const installBannerOff = (v) => flag('tc_install_banner_off', v);
+export const shouldOfferInstall = () => !isInstalled() && !installStepSeen();
+
 export async function promptInstall() {
   if (!deferred) return false;
   const e = deferred;

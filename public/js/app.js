@@ -16,6 +16,8 @@ import { profile, editProfile } from './screens/profile.js';
 import { clubStart, club, join } from './screens/club.js';
 import { wishes } from './screens/wishes.js';
 import { report, deleteAccount, privacy, wrapped } from './screens/more.js';
+import { installStep, rules } from './screens/onboard.js';
+import { follows, owner } from './screens/social.js';
 
 applyLang();
 
@@ -28,6 +30,10 @@ setRoutes([
   { re: /^\/forgot$/, screen: forgot },
   { re: /^\/reset$/, screen: reset },
   { re: /^\/privacy$/, screen: privacy },
+  { re: /^\/rules$/, screen: rules },
+  { re: /^\/install$/, screen: installStep },
+  { re: /^\/follows$/, screen: follows },
+  { re: /^\/owner$/, screen: owner },
   { re: /^\/clubs\/start$/, screen: clubStart },
   { re: /^\/club$/, screen: club },
   { re: /^\/join\/([a-zA-Z0-9]{4,20})$/, screen: join },
@@ -47,12 +53,15 @@ setRoutes([
 registerServiceWorker();
 
 let offline = false;
-try {
-  const data = await api('/me');
-  app.me = data.user;
-  app.club = data.club;
-} catch (err) {
-  offline = err.status === 0; // 401 just means "not logged in"
+const [config, me] = await Promise.allSettled([api('/config'), api('/me')]);
+if (config.status === 'fulfilled') app.config = config.value;
+if (me.status === 'fulfilled') {
+  app.me = me.value.user;
+  app.club = me.value.club;
+  app.owner = !!me.value.owner;
+  app.followRequests = me.value.followRequests || 0;
+} else {
+  offline = me.reason.status === 0; // 401 just means "not logged in"
 }
 
 if (offline) {

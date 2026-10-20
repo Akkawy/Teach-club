@@ -10,7 +10,8 @@ import { toast } from './ui.js';
 import { t, setLang } from './i18n.js';
 
 // me: the logged-in member; club: their current club ({ id, name, role }) or null.
-export const app = { me: null, club: null };
+// owner: the site owner (sees every report); config: public settings from the server.
+export const app = { me: null, club: null, owner: false, followRequests: 0, config: {} };
 
 // Remembers an invite link opened before logging in, so joining happens right after.
 const INVITE_KEY = 'tc_invite';

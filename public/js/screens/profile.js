@@ -14,6 +14,8 @@ onInstallChange(() => {
   if (document.getElementById('install-card')) render();
 });
 
+const TOPIC_KEYS = ['cooking', 'tech', 'languages', 'art', 'music', 'science', 'sports', 'health', 'money', 'books', 'games', 'crafts', 'travel', 'career', 'history', 'nature'];
+
 function installCard() {
   if (isInstalled()) return '';
   const b = (text) => html`<strong>${text}</strong>`;
@@ -92,6 +94,7 @@ export const profile = {
     const id = params[0] ? Number(params[0]) : app.me.id;
     const data = await api(`/users/${id}`);
     data.hosted.forEach(localize);
+    data.archivedLessons.forEach(localize);
     data.attended.forEach(localize);
     if (data.isMe) app.me = data.user;
     return { ...data, tab: 'taught' };
@@ -121,6 +124,21 @@ export const profile = {
       ? html`<p class="bio" dir="auto">${u.bio}</p>`
       : s.isMe ? html`<p class="bio muted">${t('profile.addBio')} <a href="/profile/edit">${t('profile.edit')}</a></p>` : ''}
     <span class="tiny muted">${t('profile.memberSince', { date: memberSince(u.memberSince) })}</span>
+    ${s.isMe
+      ? html`<a class="follow-counts" href="/follows">${tp('followers', s.followers)} · ${t('social.followingCount', { n: s.following })}${app.followRequests ? html` <span class="count-pill">${t('social.newRequests', { n: app.followRequests })}</span>` : ''}</a>`
+      : html`<span class="follow-counts">${tp('followers', s.followers)} · ${t('social.followingCount', { n: s.following })}</span>`}
+    ${s.interests.length ? html`<div class="wrap gap-6 center-wrap">${s.interests.map((k) => html`<span class="topic-chip on static">${t(`topics.${k}`)}</span>`)}</div>` : ''}
+    ${s.banned ? html`<p class="note warn small">${t('social.suspended')}</p>` : ''}
+    <div class="row gap-8 wrap center-wrap">
+      ${s.isMe
+        ? html`<a class="btn btn-secondary btn-sm" href="/follows">${icon('users', 18)}${t('social.manage')}</a>
+          <button class="btn btn-secondary btn-sm" data-action="shareProfile">${icon('share', 18)}${t('social.share')}</button>`
+        : s.blockedByMe
+          ? html`<button class="btn btn-secondary btn-sm" data-action="unblock">${t('social.unblock')}</button>`
+          : html`<button class="btn ${s.follow ? 'btn-secondary' : 'btn-primary'} btn-sm" data-action="${s.follow ? 'unfollow' : 'follow'}">${s.follow === 'accepted' ? html`${icon('check', 18, 2.4)}${t('social.following')}` : s.follow === 'pending' ? t('social.requested') : html`${icon('plus', 18, 2.4)}${t('social.follow')}`}</button>
+            <button class="btn btn-ghost btn-sm" data-action="block">${t('social.block')}</button>`}
+      ${!s.isMe && app.owner ? html`<button class="btn btn-danger btn-sm" data-action="ban">${s.banned ? t('social.unban') : t('social.ban')}</button>` : ''}
+    </div>
   </section>
 
   <section class="stats" aria-label="${t('profile.stats')}">
@@ -151,6 +169,11 @@ export const profile = {
       : html`<p class="empty-note">${s.isMe ? t('profile.noNotesMe') : t('profile.noNotesOther', { name: u.firstName })}</p>`}
   </section>
 
+  ${s.isMe && s.archivedLessons.length ? html`<details class="mx-16 mt-22 archived-list">
+    <summary class="display h-19 pad-x-4">${icon('archive', 18)}${t('social.archived')} (${s.archivedLessons.length})</summary>
+    <div class="stack-10 mt-12">${s.archivedLessons.map((l) => lessonRow(l, taughtMeta(l)))}</div>
+  </details>` : ''}
+
   ${bottomNav(s.isMe ? 'profile' : null)}
 </div>`;
   },
@@ -158,6 +181,52 @@ export const profile = {
     tab(s, el) {
       s.tab = el.dataset.tab;
       render();
+    },
+    async follow(s) {
+      const { follow } = await api(`/users/${s.user.id}/follow`, { method: 'POST' });
+      s.follow = follow;
+      if (follow === 'accepted') s.followers += 1;
+      render();
+    },
+    async unfollow(s) {
+      const was = s.follow;
+      await api(`/users/${s.user.id}/follow`, { method: 'DELETE' });
+      s.follow = null;
+      if (was === 'accepted') s.followers = Math.max(0, s.followers - 1);
+      render();
+    },
+    async block(s) {
+      if (!window.confirm(t('social.blockConfirm', { name: s.user.firstName }))) return;
+      await api(`/users/${s.user.id}/block`, { method: 'POST' });
+      toast(t('social.blocked'));
+      navigate(`/u/${s.user.id}`, { replace: true });
+    },
+    async unblock(s) {
+      await api(`/users/${s.user.id}/block`, { method: 'DELETE' });
+      toast(t('social.unblocked'));
+      navigate(`/u/${s.user.id}`, { replace: true });
+    },
+    async ban(s) {
+      if (!s.banned && !window.confirm(t('social.banConfirm', { name: s.user.firstName }))) return;
+      await api(`/owner/users/${s.user.id}/ban`, { method: s.banned ? 'DELETE' : 'POST' });
+      navigate(`/u/${s.user.id}`, { replace: true });
+    },
+    async shareProfile(s) {
+      const url = `${location.origin}/u/${s.user.id}`;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: s.user.name, url });
+        } catch {
+          // closed the share sheet
+        }
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        toast(t('social.copied'));
+      } catch {
+        toast(url);
+      }
     },
     async install() {
       if (await promptInstall()) toast(t('install.done'));
@@ -195,7 +264,10 @@ function refreshPhoto(s) {
 
 export const editProfile = {
   title: () => t('edit.title'),
-  load: () => ({ name: app.me.name, bio: app.me.bio, email: app.me.email, newPhoto: undefined, reminders: app.me.emailReminders !== false }),
+  load: () => ({
+    name: app.me.name, bio: app.me.bio, email: app.me.email, newPhoto: undefined, reminders: app.me.emailReminders !== false,
+    interests: (app.me.interests || []).slice(), approve: !!app.me.approveFollowers
+  }),
   view: (s) => html`
 <div class="screen">
   <header class="edit-head">
@@ -231,6 +303,16 @@ export const editProfile = {
     </section>
 
     <section class="card pad-18 stack-12">
+      <h2 class="h-16">${t('social.interestsTitle')}</h2>
+      <div class="wrap gap-6">${TOPIC_KEYS.map((k) => html`<button type="button" class="topic-chip ${s.interests.includes(k) ? 'on' : ''}" data-action="interest" data-k="${k}" aria-pressed="${s.interests.includes(k) ? 'true' : 'false'}">${t(`topics.${k}`)}</button>`)}</div>
+      <span class="hint">${t('social.interestsHint')}</span>
+    </section>
+
+    <section class="card pad-18 stack-12">
+      <label class="toggle-row">
+        <span class="grow stack-2"><strong>${t('social.approve')}</strong><span class="small muted">${t('social.approveHint')}</span></span>
+        <input type="checkbox" class="switch" data-input="approve" ${s.approve ? raw('checked') : ''}>
+      </label>
       <label class="toggle-row">
         <span class="grow stack-2"><strong>${t('edit.reminders')}</strong><span class="small muted">${t('edit.remindersHint')}</span></span>
         <input type="checkbox" class="switch" data-input="reminders" ${s.reminders ? raw('checked') : ''}>
@@ -262,6 +344,9 @@ export const editProfile = {
     },
     reminders(s, el) {
       s.reminders = el.checked;
+    },
+    approve(s, el) {
+      s.approve = el.checked;
     }
   },
   changes: {
@@ -278,6 +363,12 @@ export const editProfile = {
       setLang(el.dataset.lang);
       render();
     },
+    interest(s, el) {
+      const k = el.dataset.k;
+      s.interests = s.interests.includes(k) ? s.interests.filter((x) => x !== k) : s.interests.concat(k);
+      el.classList.toggle('on');
+      el.setAttribute('aria-pressed', s.interests.includes(k) ? 'true' : 'false');
+    },
     pickPhoto() {
       document.getElementById('photo-file').click();
     },
@@ -288,7 +379,7 @@ export const editProfile = {
     async save(s, button) {
       if (!s.name.trim()) return toast(t('edit.nameEmpty'));
       busy(button, true, t('common.saving'));
-      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto, emailReminders: s.reminders } });
+      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto, emailReminders: s.reminders, interests: s.interests, approveFollowers: s.approve } });
       app.me = user;
       toast(t('edit.saved'));
       navigate('/profile', { replace: true });

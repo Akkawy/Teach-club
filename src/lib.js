@@ -55,14 +55,28 @@ const AR = {
   'Pick a reason.': 'اختر سببًا.',
   "That password isn't right.": 'كلمة المرور غير صحيحة.',
   "That time zone isn't recognised.": 'لم نتعرّف على المنطقة الزمنية.',
-  'You can only follow up your own lessons.': 'يمكنك إضافة جزء ثانٍ لدروسك فقط.'
+  'You can only follow up your own lessons.': 'يمكنك إضافة جزء ثانٍ لدروسك فقط.',
+  'Slow down a little. Try again in a few minutes.': 'تمهّل قليلًا. حاول مرة أخرى بعد دقائق.',
+  "Please confirm you're 18 or older and agree to the community rules.": 'يُرجى تأكيد أن عمرك 18 عامًا أو أكثر وموافقتك على قواعد المجتمع.',
+  "We couldn't check that you're human. Please try again.": 'تعذّر التحقق من أنك إنسان. حاول مرة أخرى.',
+  'This account has been suspended.': 'تم إيقاف هذا الحساب.',
+  "New accounts can't add links yet. Try again in a few days.": 'لا يمكن للحسابات الجديدة إضافة روابط بعد. حاول مرة أخرى بعد أيام.',
+  'Add the place and area for an in-person lesson.': 'أضف المكان والمنطقة للدرس الحضوري.',
+  'Please confirm it is a public place.': 'يُرجى تأكيد أن المكان عام.',
+  'Pick how the lesson happens.': 'اختر طريقة إقامة الدرس.',
+  'Only the site owner can do that.': 'هذا متاح لمالك الموقع فقط.',
+  "That map link doesn't look right.": 'رابط الخريطة لا يبدو صحيحًا.',
+  "You can't follow yourself.": 'لا يمكنك متابعة نفسك.',
+  "You can't do that to yourself.": 'لا يمكنك فعل ذلك مع نفسك.',
+  'That lesson is full. You are on the waitlist.': 'الدرس ممتلئ. أنت على قائمة الانتظار.'
 };
 
 const AR_FIELDS = {
   'Your name': 'الاسم', Name: 'الاسم', 'What you are good at': 'ما تجيده', 'Your note': 'رسالتك', 'Your answer': 'إجابتك',
   'Plan step': 'جزء الخطة', 'Plan hint': 'تلميح الخطة', 'Plan note': 'ملاحظة الخطة', Title: 'العنوان', Pitch: 'الوصف',
   'Prep note': 'ملاحظة التحضير', 'Class link': 'رابط الدرس', 'Club name': 'اسم النادي', Wish: 'الأمنية', Details: 'التفاصيل',
-  Question: 'السؤال', Reply: 'الرد', Recap: 'الملخّص', 'Report details': 'تفاصيل البلاغ'
+  Question: 'السؤال', Reply: 'الرد', Recap: 'الملخّص', 'Report details': 'تفاصيل البلاغ',
+  Place: 'المكان', Area: 'المنطقة', 'Material title': 'عنوان المادة', 'Material link': 'رابط المادة', 'Teacher notes': 'ملاحظات المقدّم'
 };
 
 export function messageFor(err, request) {
@@ -245,7 +259,7 @@ export function unb64(str) {
 const SESSION_COOKIE = 'tc_session';
 const SESSION_DAYS = 30;
 
-export const USER_COLS = 'id, name, email, bio, photo_v, created_at, (photo IS NOT NULL) AS has_photo, current_club_id, lang, tz, email_reminders';
+export const USER_COLS = 'id, name, email, bio, photo_v, created_at, (photo IS NOT NULL) AS has_photo, current_club_id, lang, tz, email_reminders, interests, approve_followers, banned';
 
 export function readCookie(request) {
   for (const part of (request.headers.get('cookie') || '').split(';')) {
@@ -271,7 +285,7 @@ export async function currentUser(request, env) {
   if (!token) return null;
   return env.DB.prepare(
     `SELECT ${USER_COLS.split(', ').map((c) => (c.startsWith('(') ? '(u.photo IS NOT NULL) AS has_photo' : 'u.' + c)).join(', ')}
-     FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`
+     FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.banned = 0`
   ).bind(await sha256(token), Date.now()).first();
 }
 
@@ -310,7 +324,10 @@ export function publicUser(u) {
 }
 
 export function selfUser(u) {
-  return { ...publicUser(u), email: u.email, lang: u.lang, tz: u.tz, emailReminders: !!u.email_reminders };
+  return {
+    ...publicUser(u), email: u.email, lang: u.lang, tz: u.tz, emailReminders: !!u.email_reminders,
+    interests: parseJson(u.interests, []), approveFollowers: !!u.approve_followers
+  };
 }
 
 // ---------- clubs ----------
@@ -347,6 +364,60 @@ export async function shareClub(env, a, b) {
   if (a === b) return true;
   const row = await env.DB.prepare(
     'SELECT 1 FROM club_members x JOIN club_members y ON y.club_id = x.club_id WHERE x.user_id = ? AND y.user_id = ? LIMIT 1'
+  ).bind(a, b).first();
+  return !!row;
+}
+
+// ---------- safety ----------
+
+export const TOPICS = ['cooking', 'tech', 'languages', 'art', 'music', 'science', 'sports', 'health', 'money', 'books', 'games', 'crafts', 'travel', 'career', 'history', 'nature'];
+
+export const clientIp = (request) => request.headers.get('cf-connecting-ip') || 'local';
+
+// Allows at most `max` actions per `seconds` for a key (an IP address or a member). Throws 429 above that.
+export async function rateLimit(env, key, max, seconds) {
+  const bucket = Math.floor(Date.now() / 1000 / seconds) * seconds;
+  const row = await env.DB.prepare(
+    'INSERT INTO rate_limits (key, bucket, count) VALUES (?, ?, 1) ON CONFLICT (key, bucket) DO UPDATE SET count = count + 1 RETURNING count'
+  ).bind(key, bucket).first();
+  if (row.count > max) throw new HttpError(429, 'Slow down a little. Try again in a few minutes.');
+}
+
+// Cloudflare Turnstile: the free, mostly invisible "are you human?" check. Skipped until the secret is set.
+export async function verifyHuman(env, request, token) {
+  if (!env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY) return; // only on once both keys are in place
+  const form = new FormData();
+  form.append('secret', env.TURNSTILE_SECRET);
+  form.append('response', String(token || ''));
+  form.append('remoteip', clientIp(request));
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.success) return;
+  } catch (err) {
+    console.error('turnstile', err);
+  }
+  throw new HttpError(400, "We couldn't check that you're human. Please try again.");
+}
+
+// The site owner (set OWNER_EMAILS in wrangler.jsonc) can review reports from every club and suspend accounts.
+export function isOwner(env, me) {
+  const list = String(env.OWNER_EMAILS || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+  return !!me && list.includes(String(me.email).toLowerCase());
+}
+
+export function requireOwner(env, me) {
+  if (!isOwner(env, me)) throw new HttpError(403, 'Only the site owner can do that.');
+}
+
+// Accounts younger than 3 days get stricter limits (stops throwaway spam accounts).
+export const isNewAccount = (me) => Date.now() - new Date(String(me.created_at).replace(' ', 'T') + 'Z').getTime() < 3 * 864e5;
+export const hasLink = (s) => /https?:\/\/|www\.|\.(com|net|org|io|sa|me|ly)\b/i.test(String(s || ''));
+
+export async function blockedBetween(env, a, b) {
+  if (a === b) return false;
+  const row = await env.DB.prepare(
+    'SELECT 1 FROM blocks WHERE (blocker_id = ?1 AND blocked_id = ?2) OR (blocker_id = ?2 AND blocked_id = ?1) LIMIT 1'
   ).bind(a, b).first();
   return !!row;
 }

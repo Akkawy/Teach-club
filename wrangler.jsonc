@@ -24,7 +24,12 @@
   // (Settings → Variables and Secrets → type Secret), never in this file.
   "vars": {
     "MAIL_FROM": "Teach Club <noreply@club.kathib.sa>",
-    "APP_URL": "https://teach-club.abdullah-shawa.workers.dev"
+    "APP_URL": "https://teach-club.abdullah-shawa.workers.dev",
+    // Cloudflare Turnstile (free anti-bot check). The site key is public and goes here; the secret key is
+    // added as a secret named TURNSTILE_SECRET. Leave empty to switch the check off.
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFeGp8Y-I-rTtvWY"
+    // Site owner: add a secret named OWNER_EMAILS with the email you log in to Teach Club with
+    // (kept as a secret so your email isn't in this file on GitHub).
   },
 
   // The database, created with `npx wrangler d1 create teach-club-db`.

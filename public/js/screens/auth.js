@@ -7,6 +7,12 @@ import { t, setLang } from '../i18n.js';
 import { avatar, brand, icon, initialsOf, toast, busy, showError, langToggle } from '../ui.js';
 import { resizePhoto } from '../photo.js';
 import { introSeen } from './intro.js';
+import { humanCheck, humanCheckOn, resetHumanCheck } from '../turnstile.js';
+import { shouldOfferInstall } from '../install.js';
+import { rulesList } from './onboard.js';
+
+// After signing up, offer the home-screen step once, then go on.
+const viaInstall = (to) => (shouldOfferInstall() ? `/install?then=${encodeURIComponent(to)}` : to);
 
 const safeNext = (v) => (v && v.startsWith('/') && !v.startsWith('//') ? v : '/');
 
@@ -60,9 +66,10 @@ export const login = {
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('login.busy'));
       try {
-        const { user, club } = await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
+        const { user, club, owner } = await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
         app.me = user;
         app.club = club;
+        app.owner = !!owner;
         navigate(afterAuth(s.next), { replace: true });
       } catch (err) {
         busy(button, false);
@@ -100,6 +107,9 @@ export const signup = {
   public: true,
   guestOnly: true,
   load: () => introFirst('/signup') || { name: '', photo: null, typed: {} },
+  after(s) {
+    s.human = humanCheck('ts-signup');
+  },
   view: (s) => html`
 <main class="screen pad-signup">
   <div class="row-between">${brand()}${langToggle()}</div>
@@ -137,6 +147,15 @@ export const signup = {
       <textarea class="input" name="bio" rows="3" maxlength="160" dir="auto" placeholder="${t('field.bioPh')}">${s.typed.bio || ''}</textarea>
       <span class="hint">${t('signup.bioHint')}</span>
     </label>
+    <label class="check-row">
+      <input type="checkbox" name="agree" value="1" ${s.typed.agree ? 'checked' : ''}>
+      <span>${t('rules.agree')} <strong>${t('rules.agreeLink')}</strong></span>
+    </label>
+    <details class="rules-details">
+      <summary>${t('rules.title')}</summary>
+      ${rulesList()}
+    </details>
+    <div id="ts-signup" class="ts-box"></div>
     <button class="btn btn-primary btn-lg mt-6" type="submit">${t('signup.submit')}</button>
   </form>
 
@@ -184,18 +203,22 @@ export const signup = {
       if (!String(data.name || '').trim()) return showError('form-error', t('signup.errName'));
       if (!data.email) return showError('form-error', t('signup.errEmail'));
       if (String(data.password || '').length < 8) return showError('form-error', t('signup.errPw'));
+      if (!data.agree) return showError('form-error', t('rules.mustAgree'));
+      const turnstile = s.human ? s.human() : '';
+      if (humanCheckOn() && !turnstile) return showError('form-error', t('rules.human'));
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('signup.busy'));
       try {
         const { user } = await api('/signup', {
           method: 'POST',
-          body: { name: data.name, email: data.email, password: data.password, bio: data.bio, photo: s.photo }
+          body: { name: data.name, email: data.email, password: data.password, bio: data.bio, photo: s.photo, agree: true, turnstile }
         });
         app.me = user;
         app.club = null;
         navigate(afterAuth('/welcome'), { replace: true });
       } catch (err) {
         busy(button, false);
+        resetHumanCheck('ts-signup');
         showError('form-error', err.message);
       }
     }
@@ -234,8 +257,8 @@ export const welcome = {
   </ol>
 
   <div class="mt-auto stack-12">
-    <a class="btn btn-primary btn-lg" href="/">${t('welcome.see')}</a>
-    <a class="btn btn-secondary btn-lg" href="/create/new">${t('welcome.idea')}</a>
+    <a class="btn btn-primary btn-lg" href="${viaInstall('/')}">${t('welcome.see')}</a>
+    <a class="btn btn-secondary btn-lg" href="${viaInstall('/create/new')}">${t('welcome.idea')}</a>
   </div>
 </main>`
 };

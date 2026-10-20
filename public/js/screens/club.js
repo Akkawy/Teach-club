@@ -187,6 +187,10 @@ export const club = {
       ${icon('chevronRight', 18, 2.2)}
     </a>
 
+    ${app.owner ? html`<a class="card wrapped-link" href="/owner">
+      <span class="soft-square">${icon('shield', 22)}</span><strong class="grow">${t('owner.link')}</strong>${icon('chevronRight', 18, 2.2)}
+    </a>` : ''}
+
     ${s.isAdmin ? html`<section class="stack-10">
       <h2 class="display h-19 pad-x-4 row gap-8">${icon('flag', 20)}${t('club.reports')}</h2>
       ${s.reports.length ? html`<ul class="plain stack-10">${s.reports.map(reportCard)}</ul>` : html`<p class="empty-note">${t('club.noReports')}</p>`}

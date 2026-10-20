@@ -1,5 +1,8 @@
 // Every piece of text in the app, in English and Arabic.
 // {name} style placeholders are filled in by t(). Plurals use Intl.PluralRules categories.
+// Newer words live in strings-more.js and are merged in at the bottom.
+
+import { MORE } from './strings-more.js';
 
 export const STRINGS = {
   en: {
@@ -568,3 +571,12 @@ export const STRINGS = {
     }
   }
 };
+
+function merge(into, from) {
+  for (const [key, value] of Object.entries(from)) {
+    if (value && typeof value === 'object' && !Array.isArray(value) && into[key] && typeof into[key] === 'object') merge(into[key], value);
+    else into[key] = value;
+  }
+}
+merge(STRINGS.en, MORE.en);
+merge(STRINGS.ar, MORE.ar);

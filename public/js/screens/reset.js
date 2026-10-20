@@ -5,12 +5,16 @@ import { api } from '../api.js';
 import { app, navigate, render } from '../core.js';
 import { t } from '../i18n.js';
 import { icon, toast, busy, showError, langToggle } from '../ui.js';
+import { humanCheck, humanCheckOn, resetHumanCheck } from '../turnstile.js';
 
 export const forgot = {
   title: () => t('forgot.title'),
   public: true,
   guestOnly: true,
   load: ({ query }) => ({ email: query.get('email') || '', sent: false }),
+  after(s) {
+    if (!s.sent) s.human = humanCheck('ts-forgot');
+  },
   view: (s) => html`
 <main class="screen pad-auth">
   <div class="row-between">
@@ -37,6 +41,7 @@ export const forgot = {
         <label class="field">${t('field.email')}
           <input class="input" name="email" type="email" dir="ltr" autocomplete="email" placeholder="${t('field.emailPh')}" value="${s.email}" required>
         </label>
+        <div id="ts-forgot" class="ts-box"></div>
         <button class="btn btn-primary btn-lg mt-8" type="submit">${t('forgot.submit')}</button>
       </form>`}
 </main>`,
@@ -44,12 +49,15 @@ export const forgot = {
     async send(s, form) {
       const email = String(new FormData(form).get('email') || '').trim();
       if (!email) return showError('form-error', t('forgot.errEmail'));
+      const turnstile = s.human ? s.human() : '';
+      if (humanCheckOn() && !turnstile) return showError('form-error', t('rules.human'));
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('forgot.busy'));
       try {
-        await api('/forgot', { method: 'POST', body: { email } });
+        await api('/forgot', { method: 'POST', body: { email, turnstile } });
       } catch (err) {
         busy(button, false);
+        resetHumanCheck('ts-forgot');
         return showError('form-error', err.message);
       }
       s.email = email;
@@ -103,9 +111,10 @@ export const reset = {
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('reset.busy'));
       try {
-        const { user, club } = await api('/reset', { method: 'POST', body: { token: s.token, password } });
+        const { user, club, owner } = await api('/reset', { method: 'POST', body: { token: s.token, password } });
         app.me = user;
         app.club = club;
+        app.owner = !!owner;
         toast(t('reset.done'));
         navigate('/', { replace: true });
       } catch (err) {

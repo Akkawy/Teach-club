@@ -2,7 +2,7 @@
 // Pages, styles and scripts: network first (so a deploy shows up straight away), saved copy if offline.
 // Google Fonts: saved copy first. /api is never cached: lessons and accounts always come live.
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL = `shell-${VERSION}`;
 const FONTS = `fonts-${VERSION}`;
 const PRECACHE = [
@@ -10,7 +10,8 @@ const PRECACHE = [
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
   '/js/app.js', '/js/core.js', '/js/api.js', '/js/html.js', '/js/ui.js', '/js/dates.js', '/js/formats.js', '/js/photo.js', '/js/install.js', '/js/i18n.js', '/js/strings.js',
   '/js/screens/auth.js', '/js/screens/intro.js', '/js/screens/reset.js', '/js/screens/club.js', '/js/screens/wishes.js',
-  '/js/screens/present.js', '/js/screens/more.js', '/js/screens/home.js', '/js/screens/create.js', '/js/screens/lesson.js', '/js/screens/profile.js'
+  '/js/screens/present.js', '/js/screens/more.js', '/js/screens/onboard.js', '/js/screens/social.js',
+  '/js/strings-more.js', '/js/turnstile.js', '/js/screens/home.js', '/js/screens/create.js', '/js/screens/lesson.js', '/js/screens/profile.js'
 ];
 
 self.addEventListener('install', (event) => {

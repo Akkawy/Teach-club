@@ -6,6 +6,7 @@ import { app, render, isWide } from '../core.js';
 import { fmt, ORDER } from '../formats.js';
 import { t, tp } from '../i18n.js';
 import { avatar, brand, icon, formatPill, dotPill, bottomNav, desktopHeader } from '../ui.js';
+import { isInstalled, installBannerOff } from '../install.js';
 import { iso, parse, isDate, today, addDays, fmtTime, longDay, monthYear, wdShort, minutes, localize, dayStartMs } from '../dates.js';
 
 function gridRange(y, m) {
@@ -26,9 +27,75 @@ function cells(s) {
 
 async function fetchMonth(s) {
   const { start, end } = gridRange(s.y, s.m);
-  const { lessons } = await api(`/lessons?from=${dayStartMs(start)}&to=${dayStartMs(addDays(end, 1))}`);
+  const { lessons } = await api(`/lessons?from=${dayStartMs(start)}&to=${dayStartMs(addDays(end, 1))}&scope=${s.scope}`);
   s.lessons = lessons.map(localize);
 }
+
+// Which calendar: your club, people you follow, or both. Remembered on this device.
+const SCOPES = ['club', 'following', 'all'];
+function savedScope() {
+  let v = null;
+  try {
+    v = localStorage.getItem('tc_scope');
+  } catch {
+    // storage blocked
+  }
+  if (!app.club) return 'following';
+  return SCOPES.includes(v) ? v : 'all';
+}
+
+function scopeSwitch(s) {
+  if (!app.club) return '';
+  return html`<div class="seg-switch" role="radiogroup" aria-label="${t('feed.label')}">
+    ${SCOPES.map((k) => html`<button role="radio" aria-checked="${s.scope === k ? 'true' : 'false'}" class="${s.scope === k ? 'on' : ''}" data-action="scope" data-scope="${k}">${t(`feed.${k}`)}</button>`)}
+  </div>`;
+}
+
+function reasonText(r) {
+  if (r.kind === 'topic') return t('feed.reasons.topic', { topic: t(`topics.${r.topic}`) });
+  if (r.kind === 'friends') return tp('friendsGoing', r.n);
+  if (r.kind === 'format') return t('feed.reasons.format', { format: fmt(r.format).label });
+  return t(`feed.reasons.${r.kind}`, { name: r.name });
+}
+
+function forYouStrip(s) {
+  if (!s.forYou.length) return '';
+  return html`<section class="for-you">
+    <h2 class="display h-20 pad-x-4 row gap-8">${icon('sparkle', 20)}${t('feed.forYou')}</h2>
+    <div class="fy-row">${s.forYou.map(({ lesson: l, reasons }) => {
+      const f = fmt(l.format);
+      return html`<a class="card fy-card" href="/lesson/${l.id}">
+        <span class="fy-top" style="background:${f.bg};color:${f.fg}">${icon(f.icon, 16, 2.2)}<span>${shortWhen(l)}</span></span>
+        <strong class="fy-title"><bdi>${l.title}</bdi></strong>
+        <span class="who small">${avatar(l.host, 22, { font: 9 })}${l.host.firstName}</span>
+        ${reasons[0] ? html`<span class="fy-why">${reasonText(reasons[0])}</span>` : ''}
+      </a>`;
+    })}</div>
+  </section>`;
+}
+
+const shortWhen = (l) => `${l.date === today() ? t('home.today') : longDay(l.date)} · ${fmtTime(l.time)}`;
+
+function noClubCard() {
+  if (app.club) return '';
+  return html`<section class="card pad-18 stack-10 no-club">
+    <strong class="display h-19">${t('feed.noClubTitle')}</strong>
+    <span class="body-3">${t('feed.noClubBody')}</span>
+    <a class="btn btn-soft btn-sm self-start" href="/clubs/start">${icon('users', 18)}${t('feed.noClubButton')}</a>
+  </section>`;
+}
+
+function installBanner() {
+  if (isInstalled() || installBannerOff()) return '';
+  return html`<section class="install-banner">
+    <img src="/icons/icon-192.png" alt="" width="40" height="40">
+    <span class="grow stack-0"><strong>${t('installStep.bannerTitle')}</strong><span class="small muted">${t('installStep.bannerBody')}</span></span>
+    <a class="btn btn-primary btn-sm" href="/install?then=/">${t('installStep.show')}</a>
+    <button class="icon-btn small" data-action="hideBanner" aria-label="${t('installStep.dismiss')}">${icon('close', 14, 2.6)}</button>
+  </section>`;
+}
+
+const whereTag = (l) => (l.mode && l.mode !== 'online' ? html`<span class="where-tag">${icon('pin', 13, 2.2)}<bdi>${l.area || t(`feed.modes.${l.mode}`)}</bdi></span>` : '');
 
 function byDate(s) {
   const map = {};
@@ -106,6 +173,7 @@ function mobileLesson(l) {
       <span class="lc-title display"><bdi>${l.title}</bdi></span>
       <div class="lc-meta">
         <span class="who">${avatar(l.host, 28, { font: 11 })}${who(l)}${goingTag(l)}</span>
+        ${whereTag(l)}
         ${formatPill(l.format)}
       </div>
     </div>
@@ -124,11 +192,16 @@ function mobileView(s) {
   </header>
 
   <section class="home-hero">
-    <a class="club-chip" href="/club">${icon('users', 16)}<bdi>${app.club.name}</bdi></a>
+    ${app.club ? html`<a class="club-chip" href="/club">${icon('users', 16)}<bdi>${app.club.name}</bdi></a>` : ''}
     <h1 class="display h-30">${t('home.hi', { name: app.me.firstName })}</h1>
     <a class="btn btn-primary btn-xl shadow" href="/create/new">${icon('plus', 22, 2.4)}${t('nav.teach')}</a>
     <p class="small muted center">${t('home.teachSub')}</p>
   </section>
+
+  ${installBanner()}
+  ${noClubCard()}
+  ${forYouStrip(s)}
+  <div class="px-16 mt-20">${scopeSwitch(s)}</div>
 
   <section class="card cal-m">
     <div class="cal-head">${b.prev}<h2 class="display h-20">${monthYear(s.y, s.m)}</h2>${b.next}</div>
@@ -200,12 +273,15 @@ function desktopView(s) {
           ${b.next}
         </div>
       </div>
+      ${scopeSwitch(s)}
       <div class="wd-row dk-wd">${weekdays()}</div>
       <div class="dk-grid">${cells(s).map((d) => desktopCell(s, d, map))}</div>
       ${legend(9, true)}
     </section>
 
     <aside class="dk-aside">
+      ${noClubCard()}
+      ${forYouStrip(s)}
       <div class="day-head"><h2 class="display h-22">${selLabel(s)}</h2><span class="small muted">${countLabel(list.length)}</span></div>
       ${list.length ? list.map(desktopLesson) : emptyDay(s, true)}
       <div class="promo">
@@ -221,12 +297,12 @@ function desktopView(s) {
 export const home = {
   title: () => t('home.title'),
   responsive: true,
-  needsClub: true,
   async load({ query }) {
     const day = isDate(query.get('day')) ? query.get('day') : today();
     const d = parse(day);
-    const s = { y: d.getFullYear(), m: d.getMonth(), sel: day, lessons: [] };
-    await fetchMonth(s);
+    const s = { y: d.getFullYear(), m: d.getMonth(), sel: day, lessons: [], forYou: [], scope: savedScope() };
+    const [, fy] = await Promise.all([fetchMonth(s), api('/for-you').catch(() => ({ suggestions: [] }))]);
+    s.forYou = fy.suggestions.map((x) => ({ ...x, lesson: localize(x.lesson) }));
     return s;
   },
   view: (s) => (isWide() ? desktopView(s) : mobileView(s)),
@@ -243,6 +319,20 @@ export const home = {
     },
     pick(s, el) {
       s.sel = el.dataset.day;
+      render();
+    },
+    async scope(s, el) {
+      s.scope = el.dataset.scope;
+      try {
+        localStorage.setItem('tc_scope', s.scope);
+      } catch {
+        // storage blocked
+      }
+      await fetchMonth(s);
+      render();
+    },
+    hideBanner() {
+      installBannerOff(true);
       render();
     }
   }

@@ -1,8 +1,10 @@
 // Clubs: private groups with their own calendar and invite link. Plus reports for club admins.
 
 import {
-  HttpError, json, readJson, text, randomCode, userCols, userFrom, currentClub, requireClub, roleIn
+  HttpError, json, readJson, text, randomCode, userCols, userFrom, currentClub, requireClub, roleIn, rateLimit, isOwner
 } from './lib.js';
+
+const AUTO_HIDE_REPORTS = 3; // a lesson reported by this many different people is hidden until reviewed
 
 const clubOut = (c) => ({ id: c.id, name: c.name, role: c.role });
 
@@ -136,6 +138,7 @@ export async function joinByInvite(env, me, code) {
 const REASONS = ['spam', 'offensive', 'unsafe', 'other'];
 
 export async function createReport(request, env, me) {
+  await rateLimit(env, `reports:${me.id}`, 10, 86400);
   const b = await readJson(request);
   if (!REASONS.includes(b.reason)) throw new HttpError(400, 'Pick a reason.');
   const details = text(b.details, 'Report details', { max: 500 });
@@ -143,9 +146,18 @@ export async function createReport(request, env, me) {
   let lessonId = null;
   let userId = null;
   if (b.lessonId) {
-    const lesson = await env.DB.prepare('SELECT club_id FROM lessons WHERE id = ?').bind(Number(b.lessonId)).first();
-    if (!lesson || !(await roleIn(env, me.id, lesson.club_id))) throw new HttpError(404, "We couldn't find that lesson. It may have been cancelled.");
-    clubId = lesson.club_id;
+    const lesson = await env.DB.prepare('SELECT club_id, host_id FROM lessons WHERE id = ?').bind(Number(b.lessonId)).first();
+    // Only people who can actually see the lesson may report it (so outsiders can't gang up to hide it).
+    const canSee = lesson && ((lesson.club_id && (await roleIn(env, me.id, lesson.club_id)))
+      || (await env.DB.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ? AND status = 'accepted'").bind(me.id, lesson.host_id).first()));
+    if (!canSee) throw new HttpError(404, "We couldn't find that lesson. It may have been cancelled.");
+    // Lessons outside a club (shared with followers) are reviewed by the site owner; they use the teacher's first club.
+    clubId = lesson.club_id || (await env.DB.prepare('SELECT club_id FROM club_members WHERE user_id = ? ORDER BY joined_at LIMIT 1').bind(lesson.host_id).first())?.club_id;
+    if (!clubId) {
+      const any = await env.DB.prepare('SELECT id FROM clubs ORDER BY id LIMIT 1').first();
+      clubId = any && any.id;
+    }
+    if (!clubId) throw new HttpError(404, "We couldn't find that lesson. It may have been cancelled.");
     lessonId = Number(b.lessonId);
   } else {
     const club = await requireClub(env, me);
@@ -155,13 +167,22 @@ export async function createReport(request, env, me) {
   }
   await env.DB.prepare('INSERT INTO reports (club_id, reporter_id, lesson_id, user_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(clubId, me.id, lessonId, userId, b.reason, details).run();
+  if (lessonId) {
+    await env.DB.prepare(
+      'UPDATE lessons SET hidden = 1 WHERE id = ?1 AND (SELECT COUNT(DISTINCT reporter_id) FROM reports WHERE lesson_id = ?1 AND resolved = 0) >= ?2'
+    ).bind(lessonId, AUTO_HIDE_REPORTS).run();
+  }
   return json({ ok: true }, 201);
 }
 
 export async function resolveReport(env, me, reportId) {
-  const report = await env.DB.prepare('SELECT club_id FROM reports WHERE id = ?').bind(reportId).first();
+  const report = await env.DB.prepare('SELECT club_id, lesson_id FROM reports WHERE id = ?').bind(reportId).first();
   if (!report) throw new HttpError(404, 'Not found.');
-  await requireAdmin(env, me, report.club_id);
+  if (!isOwner(env, me)) await requireAdmin(env, me, report.club_id);
   await env.DB.prepare('UPDATE reports SET resolved = 1 WHERE id = ?').bind(reportId).run();
+  // Reviewed and kept: a hidden lesson comes back once no reports are left open.
+  await env.DB.prepare(
+    'UPDATE lessons SET hidden = 0 WHERE id = (SELECT lesson_id FROM reports WHERE id = ?1) AND NOT EXISTS (SELECT 1 FROM reports WHERE lesson_id = lessons.id AND resolved = 0)'
+  ).bind(reportId).run();
   return json({ ok: true });
 }

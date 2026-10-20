@@ -74,6 +74,29 @@ function linkTile(l) {
   return dashed('lock', t('lesson.afterRsvp'));
 }
 
+function whereTile(l) {
+  if (l.mode === 'online') return '';
+  const exact = !!l.place;
+  const inner = html`<span class="stack-0 min0"><span class="tiny muted">${t('where.label')}</span>
+    <strong class="small-strong"><bdi>${exact ? l.place : l.area}</bdi></strong>
+    <span class="tiny muted"><bdi>${exact ? l.area : t('lessonMore.placeHidden')}</bdi></span></span>`;
+  return l.mapLink
+    ? html`<a class="info-tile span-2" href="${l.mapLink}" target="_blank" rel="noopener noreferrer">${icon('pin', 22)}${inner}<span class="chip-btn">${t('lessonMore.openMap')}</span></a>`
+    : html`<div class="info-tile span-2">${icon('pin', 22)}${inner}</div>`;
+}
+
+function materialsCard(l) {
+  if (!l.materials.length) {
+    return l.materialCount ? html`<p class="note small">${icon('lock', 18)}${tp('materialsLocked', l.materialCount)}</p>` : '';
+  }
+  return html`<section class="card pad-18 stack-10">
+    <h2 class="display h-19 row gap-8">${icon('file', 22)}${t('lessonMore.materials')}</h2>
+    <ul class="plain stack-8">${l.materials.map((m) => html`<li><a class="material-row link" href="${m.url}" target="_blank" rel="noopener noreferrer">
+      ${icon('link', 18)}<span class="grow min0"><strong class="small"><bdi>${m.title || hostOf(m.url)}</bdi></strong><span class="tiny muted ellipsis" dir="ltr">${hostOf(m.url)}</span></span>${icon('chevronRight', 16, 2.2)}
+    </a></li>`)}</ul>
+  </section>`;
+}
+
 function hostCard(l) {
   const h = l.host;
   return html`<section class="card host-card">
@@ -105,22 +128,29 @@ function beforeCard(l) {
 function goingCard(l, over) {
   const shown = l.attendees.slice(0, 5);
   const extra = l.goingCount - shown.length;
+  const full = l.seats > 0 && l.goingCount >= l.seats;
   let actions;
   if (l.isHost) actions = html`<p class="small muted">${t('lesson.hostNote')}</p>`;
   else if (over) actions = html`<p class="small muted">${t('lesson.finished')}</p>`;
-  else if (l.going) {
+  else if (l.waitlisted) {
+    actions = html`<div class="row gap-8">
+      <span class="going-yes wait grow">${icon('clock', 20, 2.4)}${t('lessonMore.waitlist', { n: l.waitlistPosition })}</span>
+      <button class="btn btn-secondary btn-lg compact" data-action="leave">${t('lessonMore.leaveWaitlist')}</button>
+    </div>`;
+  } else if (l.going) {
     actions = html`<div class="row gap-8">
       <span class="going-yes grow">${icon('check', 20, 2.6)}${t('lesson.youreGoing')}</span>
       <button class="btn btn-secondary btn-lg compact" data-action="leave">${t('lesson.cantMake')}</button>
     </div>`;
-  } else actions = html`<button class="btn btn-primary btn-lg" data-action="join">${t('lesson.imIn')}</button>`;
+  } else actions = html`<button class="btn ${full ? 'btn-secondary' : 'btn-primary'} btn-lg" data-action="join">${full ? t('lessonMore.joinWaitlist') : t('lesson.imIn')}</button>`;
+  const seatLine = l.seats > 0 && !over ? html`<span class="tag ${full ? '' : 'ok'}">${full ? t('lessonMore.full') : tp('seatsLeft', l.seats - l.goingCount)}</span>` : '';
   return html`<section class="card pad-18 stack-14">
     <div class="row-between gap-10">
       <div class="faces">
         ${shown.map((u) => avatar(u, 38, { cls: 'face', title: u.name, font: 12 }))}
         ${extra > 0 ? html`<span class="avatar face more" style="width:38px;height:38px">+${extra}</span>` : ''}
       </div>
-      <span class="going-count">${l.goingCount ? t('lesson.goingN', { n: l.goingCount }) : over ? t('lesson.nobody') : t('lesson.beFirst')}</span>
+      <span class="going-count stack-2">${l.goingCount ? t('lesson.goingN', { n: l.goingCount }) : over ? t('lesson.nobody') : t('lesson.beFirst')}${seatLine}</span>
     </div>
     ${actions}
   </section>`;
@@ -149,9 +179,11 @@ function planCard(l) {
     ${l.isHost && l.surprise ? html`<p class="note warn small">${icon('gift', 18)}${t('lesson.surpriseHost')}</p>` : ''}
     <div class="seg-bar thin" aria-hidden="true">${parts.map((p, i) => html`<span style="flex:${p.min} 1 0;background:${f.ramp[i % f.ramp.length]}"></span>`)}</div>
     <ol class="plain plan-list">
-      ${parts.map((p) => html`<li>
+      ${parts.map((p, i) => html`<li>
         <span class="ol-min" style="color:${f.fg}">${minutes(p.min)}</span>
-        <span class="stack-2"><strong>${p.name}</strong><span class="small muted pre-line" ${p.own ? raw('dir="auto"') : ''}>${p.desc}</span></span>
+        <span class="stack-2 grow min0"><strong>${p.name}</strong><span class="small muted pre-line" ${p.own ? raw('dir="auto"') : ''}>${p.desc}</span>
+          ${l.teacherNotes && l.teacherNotes[i] ? html`<details class="seg-notes"><summary>${icon('note', 16)}${t('lessonMore.notes')}</summary><p class="body-3 pre-line" dir="auto">${l.teacherNotes[i]}</p></details>` : ''}
+        </span>
       </li>`)}
     </ol>
   </section>`;
@@ -258,7 +290,7 @@ export const lesson = {
       </div>
     </div>
     <div class="hero-text">
-      ${formatPill(l.format, { onHero: true })}
+      <div class="row gap-6 wrap">${formatPill(l.format, { onHero: true })}${l.isHost ? html`<span class="pill hero-tag">${icon(l.visibility === 'followers' ? 'heart' : 'users', 14)}${l.visibility === 'followers' ? t('lessonMore.visFollowers') : t('lessonMore.visClub')}</span>` : ''}</div>
       ${l.parent ? html`<a class="parent-link" href="/lesson/${l.parent.id}">${icon('link', 14)}<bdi>${t('lesson.partTwoOf', { title: l.parent.title })}</bdi></a>` : ''}
       <h1 class="display h-32"><bdi>${l.title}</bdi></h1>
       ${l.pitch ? html`<p class="hero-pitch" style="color:${f.heroInk}"><bdi>${l.pitch}</bdi></p>` : ''}
@@ -266,11 +298,14 @@ export const lesson = {
   </div>
 
   <main class="lesson-main">
+    ${l.archived ? html`<p class="note warn small">${icon('archive', 18)}${t('lessonMore.archivedBanner')}</p>` : ''}
+    ${l.hidden ? html`<p class="note warn small">${icon('flag', 18)}${t('lessonMore.hiddenBanner')}</p>` : ''}
     <section class="grid-2 gap-8" aria-label="${t('lesson.whenHow')}">
       ${infoTile('calendar', t('common.date'), shortDate(l.date))}
       ${infoTile('clock', t('common.time'), fmtTime(l.time), otherZone ? t('lesson.hostTime', { time: fmtTime(l.hostTime), tz: tzCity(l.tz) }) : '')}
       ${infoTile('hourglass', t('common.length'), tp('minLong', l.length))}
-      ${linkTile(l)}
+      ${l.mode === 'in_person' ? '' : linkTile(l)}
+      ${whereTile(l)}
     </section>
     ${l.isHost && l.autoRoom ? html`<p class="note small">${icon('video', 18)}${t('lesson.autoRoom')}</p>` : ''}
     ${over ? '' : html`<div class="cal-buttons">
@@ -282,16 +317,19 @@ export const lesson = {
     ${beforeCard(l)}
     ${goingCard(l, over)}
     ${planCard(l)}
+    ${materialsCard(l)}
     ${questionsCard(l)}
     ${extrasCard(l, over)}
     ${partTwoCard(l, over)}
     ${afterCard(l, over)}
     ${l.isHost ? html`<section class="host-tools">
       <a class="btn btn-secondary btn-md grow" href="/create/new?edit=${l.id}">${icon('pencil', 18)}${t('lesson.edit')}</a>
+      <button class="btn btn-secondary btn-md" data-action="archive">${icon('archive', 18)}${l.archived ? t('lessonMore.unarchive') : t('lessonMore.archive')}</button>
       <button class="btn btn-danger btn-md" data-action="cancelLesson">${icon('trash', 18)}${t('lesson.cancel')}</button>
     </section>` : l.isAdmin ? html`<section class="host-tools">
       <button class="btn btn-danger btn-md" data-action="cancelLesson">${icon('trash', 18)}${t('lesson.adminDelete')}</button>
     </section>` : ''}
+    <p class="disclaimer">${icon('bubbles', 14)}${t('lessonMore.disclaimer')}</p>
   </main>
 </div>`;
   },
@@ -318,10 +356,16 @@ export const lesson = {
     },
     async join(s, button) {
       busy(button, true, t('common.saving'));
-      await api(`/lessons/${s.l.id}/rsvp`, { method: 'POST' });
+      const { status } = await api(`/lessons/${s.l.id}/rsvp`, { method: 'POST' });
       s.l = await fetchLesson(s.l.id);
       render();
-      toast(t('lesson.joined'));
+      toast(status === 'waitlist' ? t('lessonMore.joinedWaitlist') : t('lesson.joined'));
+    },
+    async archive(s) {
+      const { archived } = await api(`/lessons/${s.l.id}/archive`, { method: 'PUT', body: { archived: !s.l.archived } });
+      s.l = await fetchLesson(s.l.id);
+      render();
+      toast(archived ? t('lessonMore.archived') : t('lessonMore.unarchived'));
     },
     async leave(s, button) {
       busy(button, true, t('common.saving'));
