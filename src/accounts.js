@@ -8,6 +8,7 @@ import {
   TOPICS, clientIp, rateLimit, verifyHuman, isOwner, blockedBetween
 } from './lib.js';
 import { canEmail, sendResetEmail } from './email.js';
+import { unreadCount, GROUPS } from './notify.js';
 
 export const LESSON_COLS = 'l.id, l.title, l.pitch, l.format, l.date, l.time, l.length, l.tz, l.starts_at, l.mode, l.area, l.visibility, l.tags, l.archived';
 
@@ -90,8 +91,19 @@ export async function getMe(request, env, me) {
     me.lang = lang;
     me.tz = tz;
   }
-  const requests = await env.DB.prepare("SELECT COUNT(*) AS n FROM follows WHERE followee_id = ? AND status = 'pending'").bind(me.id).first();
-  return json({ user: selfUser(me), club: await currentClub(env, me), owner: isOwner(env, me), followRequests: requests.n });
+  const [requests, following, blocked] = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM follows WHERE followee_id = ? AND status = 'pending'").bind(me.id),
+    env.DB.prepare('SELECT followee_id AS id, status FROM follows WHERE follower_id = ?').bind(me.id),
+    env.DB.prepare('SELECT blocked_id AS id FROM blocks WHERE blocker_id = ?1 UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?1').bind(me.id)
+  ]);
+  return json({
+    user: selfUser(me), club: await currentClub(env, me), owner: isOwner(env, me), followRequests: requests.results[0].n,
+    // For the quick-follow ➕ on avatars: who you already follow (or asked to), and who to never offer.
+    following: following.results.filter((r) => r.status === 'accepted').map((r) => r.id),
+    requested: following.results.filter((r) => r.status === 'pending').map((r) => r.id),
+    blocked: blocked.results.map((r) => r.id),
+    unread: await unreadCount(env, me)
+  });
 }
 
 export async function updateMe(request, env, me) {
@@ -103,16 +115,18 @@ export async function updateMe(request, env, me) {
   const reminders = b.emailReminders === undefined ? me.email_reminders : (b.emailReminders ? 1 : 0);
   const approve = b.approveFollowers === undefined ? me.approve_followers : (b.approveFollowers ? 1 : 0);
   const interests = b.interests === undefined ? me.interests : JSON.stringify(topicsOf(b.interests, 8));
+  const notifyOff = b.notifyOff === undefined ? me.notify_off
+    : JSON.stringify([...new Set((Array.isArray(b.notifyOff) ? b.notifyOff : []).filter((g) => GROUPS.includes(g)))]);
 
   const taken = await env.DB.prepare('SELECT 1 FROM users WHERE email = ? AND id != ?').bind(email, me.id).first();
   if (taken) throw new HttpError(409, 'Another member already uses that email.');
 
-  const set = 'name = ?, bio = ?, email = ?, email_reminders = ?, approve_followers = ?, interests = ?';
+  const set = 'name = ?, bio = ?, email = ?, email_reminders = ?, approve_followers = ?, interests = ?, notify_off = ?';
   const row = photo === undefined
     ? await env.DB.prepare(`UPDATE users SET ${set} WHERE id = ? RETURNING ${USER_COLS}`)
-      .bind(name, bio, email, reminders, approve, interests, me.id).first()
+      .bind(name, bio, email, reminders, approve, interests, notifyOff, me.id).first()
     : await env.DB.prepare(`UPDATE users SET ${set}, photo = ?, photo_v = photo_v + 1 WHERE id = ? RETURNING ${USER_COLS}`)
-      .bind(name, bio, email, reminders, approve, interests, photo, me.id).first();
+      .bind(name, bio, email, reminders, approve, interests, notifyOff, photo, me.id).first();
   // Turning approval off lets everyone who was waiting in.
   if (!approve) await env.DB.prepare("UPDATE follows SET status = 'accepted' WHERE followee_id = ? AND status = 'pending'").bind(me.id).run();
   return json({ user: selfUser(row) });

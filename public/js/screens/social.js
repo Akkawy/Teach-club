@@ -5,13 +5,15 @@ import { api } from '../api.js';
 import { app, navigate, render } from '../core.js';
 import { t } from '../i18n.js';
 import { avatar, icon, toast, bottomNav } from '../ui.js';
+import { withFollow } from '../follow.js';
 
 const TABS = ['requests', 'followers', 'following', 'blocked'];
 
-function personRow(u, buttons) {
+function personRow(u, buttons, quick = true) {
+  const face = avatar(u, 40, { font: 14 });
   return html`<li class="card member-row">
     <div class="row gap-10">
-      <a href="/u/${u.id}" class="member-main grow min0">${avatar(u, 40, { font: 14 })}<strong class="grow min0"><bdi>${u.name}</bdi></strong></a>
+      <a href="/u/${u.id}" class="member-main grow min0">${quick ? withFollow(u, face, 40) : face}<strong class="grow min0"><bdi>${u.name}</bdi></strong></a>
       <div class="row gap-6">${buttons}</div>
     </div>
   </li>`;
@@ -32,7 +34,7 @@ export const follows = {
         <button class="chip-btn danger" data-action="decline" data-id="${u.id}">${t('social.decline')}</button>`)),
       followers: s.followers.map((u) => personRow(u, html`<button class="chip-btn" data-action="decline" data-id="${u.id}">${t('social.remove')}</button>`)),
       following: s.following.map((u) => personRow(u, html`<button class="chip-btn" data-action="unfollow" data-id="${u.id}">${u.pending ? t('social.requested') : t('social.unfollow')}</button>`)),
-      blocked: s.blocked.map((u) => personRow(u, html`<button class="chip-btn" data-action="unblock" data-id="${u.id}">${t('social.unblock')}</button>`))
+      blocked: s.blocked.map((u) => personRow(u, html`<button class="chip-btn" data-action="unblock" data-id="${u.id}">${t('social.unblock')}</button>`, false))
     };
     const label = { requests: t('social.tabRequests'), followers: t('social.tabFollowers'), following: t('social.tabFollowing'), blocked: t('social.tabBlocked') };
     const count = { requests: s.requests.length, followers: s.followers.length, following: s.following.length, blocked: s.blocked.length };
@@ -64,10 +66,13 @@ export const follows = {
     },
     async unfollow(s, el) {
       await api(`/users/${el.dataset.id}/follow`, { method: 'DELETE' });
+      app.following.delete(Number(el.dataset.id));
+      app.requested.delete(Number(el.dataset.id));
       navigate(`/follows?tab=${s.tab}`, { replace: true });
     },
     async unblock(s, el) {
       await api(`/users/${el.dataset.id}/block`, { method: 'DELETE' });
+      app.blocked.delete(Number(el.dataset.id));
       toast(t('social.unblocked'));
       navigate(`/follows?tab=${s.tab}`, { replace: true });
     }
@@ -89,7 +94,8 @@ export const owner = {
   </header>
   <main class="lesson-main">
     ${s.reports.length ? html`<ul class="plain stack-10">${s.reports.map((r) => html`<li class="card pad-16 stack-8">
-      <div class="row-between gap-8"><strong>${t(`report.reasons.${r.reason}`)}</strong><span class="tiny muted"><bdi>${t('owner.club', { club: r.club })}</bdi></span></div>
+      <div class="row-between gap-8"><strong>${t(`report.reasons.${r.reason}`)}</strong><span class="tiny muted"><bdi>${r.club ? t('owner.club', { club: r.club }) : t('video.followersOnly')}</bdi></span></div>
+      ${mediaReport(r)}
       ${r.lesson ? html`<a href="/lesson/${r.lesson.id}" class="small">${t('club.reportOn', { title: r.lesson.title })}${r.lesson.hidden ? html` <span class="tag">${t('owner.hidden')}</span>` : ''}</a>` : ''}
       ${r.member ? html`<a href="/u/${r.member.id}" class="small">${t('club.reportOnMember', { name: r.member.name })}</a>` : ''}
       ${r.details ? html`<p class="body-3 pre-line" dir="auto">${r.details}</p>` : ''}
@@ -99,6 +105,8 @@ export const owner = {
         ${r.lesson ? html`<button class="chip-btn danger" data-action="deleteLesson" data-id="${r.lesson.id}">${icon('trash', 16)}${t('club.deleteLesson')}</button>` : ''}
         ${r.lesson ? html`<button class="chip-btn danger" data-action="ban" data-id="${r.lesson.hostId}">${t('social.ban')}</button>` : ''}
         ${r.member && !r.member.banned ? html`<button class="chip-btn danger" data-action="ban" data-id="${r.member.id}">${t('social.ban')}</button>` : ''}
+        ${mediaButtons(r)}
+        ${r.comment ? html`<button class="chip-btn danger" data-action="ban" data-id="${r.comment.authorId}">${t('social.ban')}</button>` : ''}
       </div>
     </li>`)}</ul>` : html`<p class="empty-note">${t('owner.none')}</p>`}
   </main>
@@ -119,6 +127,34 @@ export const owner = {
       if (!window.confirm(t('social.banConfirm', { name: '' }))) return;
       await api(`/owner/users/${el.dataset.id}/ban`, { method: 'POST' });
       navigate('/owner', { replace: true });
-    }
+    },
+    ...mediaActions('/owner')
   }
 };
+
+// Reports about videos and comments (also used on the club page for admins).
+export function mediaReport(r) {
+  return html`${r.video ? html`<a href="/video/${r.video.id}" class="small">${t('video.reportOn', { title: r.video.title })}${r.video.hidden ? html` <span class="tag">${t('owner.hidden')}</span>` : ''}</a>` : ''}
+    ${r.comment ? html`<a href="/video/${r.comment.videoId}" class="small">${t('video.reportOnComment')}${r.comment.hidden ? html` <span class="tag">${t('owner.hidden')}</span>` : ''}</a>
+      <p class="body-3 pre-line quote" dir="auto">${r.comment.body}</p>` : ''}`;
+}
+
+export function mediaButtons(r) {
+  return html`${r.video ? html`<button class="chip-btn danger" data-action="removeVideo" data-id="${r.video.id}">${icon('trash', 16)}${t('video.remove')}</button>` : ''}
+    ${r.comment ? html`<button class="chip-btn danger" data-action="removeReportedComment" data-id="${r.comment.id}">${icon('trash', 16)}${t('video.removeComment')}</button>` : ''}`;
+}
+
+export function mediaActions(back) {
+  return {
+    async removeVideo(s, el) {
+      if (!window.confirm(t('video.removeConfirm'))) return;
+      await api(`/videos/${el.dataset.id}`, { method: 'DELETE' });
+      navigate(back, { replace: true });
+    },
+    async removeReportedComment(s, el) {
+      if (!window.confirm(t('video.removeCommentConfirm'))) return;
+      await api(`/comments/${el.dataset.id}`, { method: 'DELETE' });
+      navigate(back, { replace: true });
+    }
+  };
+}

@@ -2,7 +2,8 @@
 
 import { api } from './api.js';
 import { esc } from './html.js';
-import { app, setRoutes, start } from './core.js';
+import { app, applyMe, setRoutes, start } from './core.js';
+import { startBellPolling } from './follow.js';
 import { applyLang, t } from './i18n.js';
 import { registerServiceWorker } from './install.js';
 import { login, signup, welcome } from './screens/auth.js';
@@ -15,6 +16,9 @@ import { present } from './screens/present.js';
 import { profile, editProfile } from './screens/profile.js';
 import { clubStart, club, join } from './screens/club.js';
 import { wishes } from './screens/wishes.js';
+import { explore } from './screens/explore.js';
+import { video, newVideo } from './screens/video.js';
+import { notifications } from './screens/notifications.js';
 import { report, deleteAccount, privacy, wrapped } from './screens/more.js';
 import { installStep, rules } from './screens/onboard.js';
 import { follows, owner } from './screens/social.js';
@@ -38,6 +42,10 @@ setRoutes([
   { re: /^\/club$/, screen: club },
   { re: /^\/join\/([a-zA-Z0-9]{4,20})$/, screen: join },
   { re: /^\/wishes$/, screen: wishes },
+  { re: /^\/explore$/, screen: explore },
+  { re: /^\/videos\/new$/, screen: newVideo },
+  { re: /^\/video\/(\d+)$/, screen: video },
+  { re: /^\/notifications$/, screen: notifications },
   { re: /^\/wrapped$/, screen: wrapped },
   { re: /^\/report$/, screen: report },
   { re: /^\/create\/(new|[1-6])$/, screen: create },
@@ -56,10 +64,7 @@ let offline = false;
 const [config, me] = await Promise.allSettled([api('/config'), api('/me')]);
 if (config.status === 'fulfilled') app.config = config.value;
 if (me.status === 'fulfilled') {
-  app.me = me.value.user;
-  app.club = me.value.club;
-  app.owner = !!me.value.owner;
-  app.followRequests = me.value.followRequests || 0;
+  applyMe(me.value);
 } else {
   offline = me.reason.status === 0; // 401 just means "not logged in"
 }
@@ -72,4 +77,5 @@ if (offline) {
   </main>`;
 } else {
   start();
+  startBellPolling();
 }

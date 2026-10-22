@@ -2,6 +2,15 @@
 // About a day before and about 15 minutes before, to the host and everyone who said yes.
 
 import { canEmail, sendReminderEmail, DAILY_EMAIL_CAP } from './email.js';
+import { pruneNotifications } from './notify.js';
+
+// Emails left today (reminders, "video became a lesson" emails and password resets share one budget).
+export async function emailBudget(env) {
+  const used = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM sent_reminders WHERE sent_at > ?1) + (SELECT COUNT(*) FROM password_resets WHERE created_at > ?1) AS n`
+  ).bind(Date.now() - 24 * HOUR).first();
+  return DAILY_EMAIL_CAP - used.n;
+}
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -15,11 +24,9 @@ export async function sendReminders(env) {
   const now = Date.now();
   // Housekeeping: forget rate-limit counters older than two days.
   await env.DB.prepare('DELETE FROM rate_limits WHERE bucket < ?').bind(Math.floor(now / 1000) - 2 * 86400).run();
+  await pruneNotifications(env);
   if (!canEmail(env)) return;
-  const used = await env.DB.prepare(
-    `SELECT (SELECT COUNT(*) FROM sent_reminders WHERE sent_at > ?1) + (SELECT COUNT(*) FROM password_resets WHERE created_at > ?1) AS n`
-  ).bind(now - 24 * HOUR).first();
-  let budget = DAILY_EMAIL_CAP - used.n;
+  let budget = await emailBudget(env);
   if (budget <= 0) return console.log('Reminder emails paused: daily email limit reached.');
 
   const appUrl = (env.APP_URL || '').replace(/\/+$/, '');

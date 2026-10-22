@@ -18,6 +18,10 @@ export const report = {
     const lessonId = query.get('lesson');
     const userId = query.get('user');
     if (lessonId) return { lessonId, back: `/lesson/${lessonId}` };
+    const videoId = query.get('video');
+    const commentId = query.get('comment');
+    if (videoId) return { videoId, back: `/video/${videoId}` };
+    if (commentId) return { commentId, back: /^\d+$/.test(query.get('from') || '') ? `/video/${query.get('from')}` : '/explore' };
     if (userId) {
       const { user } = await api(`/users/${encodeURIComponent(userId)}`);
       return { userId, name: user.name, back: `/u/${userId}` };
@@ -30,7 +34,7 @@ export const report = {
     <a class="icon-btn" href="${s.back}" aria-label="${t('common.back')}">${icon('chevronLeft', 20, 2.2)}</a>
   </div>
   <div class="stack-8">
-    <h1 class="display h-30 row gap-8">${icon('flag', 26)}${s.lessonId ? t('report.lessonHeading') : t('report.memberHeading', { name: s.name })}</h1>
+    <h1 class="display h-30 row gap-8">${icon('flag', 26)}${s.lessonId ? t('report.lessonHeading') : s.videoId ? t('video.reportHeading') : s.commentId ? t('video.reportCommentHeading') : t('report.memberHeading', { name: s.name })}</h1>
     <p class="lede">${t('report.lede')}</p>
   </div>
   <form class="form" data-submit="send" novalidate>
@@ -50,7 +54,7 @@ export const report = {
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('report.sending'));
       try {
-        await api('/reports', { method: 'POST', body: { reason: data.reason, details: data.details, lessonId: s.lessonId, userId: s.userId } });
+        await api('/reports', { method: 'POST', body: { reason: data.reason, details: data.details, lessonId: s.lessonId, userId: s.userId, videoId: s.videoId, commentId: s.commentId } });
       } catch (err) {
         busy(button, false);
         return showError('report-error', err.message);

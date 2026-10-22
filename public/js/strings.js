@@ -3,6 +3,7 @@
 // Newer words live in strings-more.js and are merged in at the bottom.
 
 import { MORE } from './strings-more.js';
+import { VIDEOS } from './strings-videos.js';
 
 export const STRINGS = {
   en: {
@@ -580,3 +581,5 @@ function merge(into, from) {
 }
 merge(STRINGS.en, MORE.en);
 merge(STRINGS.ar, MORE.ar);
+merge(STRINGS.en, VIDEOS.en);
+merge(STRINGS.ar, VIDEOS.ar);

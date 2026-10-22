@@ -76,6 +76,28 @@ function whenText(startsAt, tz, ar) {
   }).format(new Date(startsAt));
 }
 
+// To people who tapped "I'd join a lesson on this" on a video, once its owner turns it into a lesson.
+export async function sendVideoLessonEmail(env, { user, video, lesson, teacher, appUrl }) {
+  const ar = user.lang === 'ar';
+  const when = whenText(lesson.starts_at, user.tz, ar);
+  const settings = `${appUrl}/profile/edit`;
+  const t = ar
+    ? {
+      subject: `أصبح درسًا: ${lesson.title}`,
+      lines: [`حوّل ${teacher} الفيديو «${video}» إلى درس، وكنت قد قلت إنك ستحضره.`, `الموعد: ${when}`],
+      button: 'عرض الدرس',
+      small: ['لا تريد هذه الرسائل؟ أوقف إشعارات الفيديو من «تعديل الملف»:', settings]
+    }
+    : {
+      subject: `Now a lesson: ${lesson.title}`,
+      lines: [`${teacher} turned the video "${video}" into a lesson. You said you'd join one.`, `When: ${when}`],
+      button: 'See the lesson',
+      small: ["Don't want these? Turn off video notifications in Edit profile:", settings]
+    };
+  const { html, text } = layout({ ar, heading: lesson.title, lines: t.lines, button: { label: t.button, href: `${appUrl}/lesson/${lesson.id}` }, small: t.small });
+  return sendEmail(env, { to: user.email, subject: t.subject, html, text });
+}
+
 // kind: 'day' (about a day before) or 'soon' (about 15 minutes before). isHost changes the wording.
 export async function sendReminderEmail(env, { user, lesson, kind, isHost, callLink, appUrl }) {
   const ar = user.lang === 'ar';

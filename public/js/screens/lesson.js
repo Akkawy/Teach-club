@@ -6,6 +6,7 @@ import { app, navigate, render } from '../core.js';
 import { fmt, REACTIONS, reactionLabel } from '../formats.js';
 import { t, tp } from '../i18n.js';
 import { avatar, icon, formatPill, toast, busy, isWebLink, hostOf, linkify } from '../ui.js';
+import { withFollow } from '../follow.js';
 import { fmtTime, shortDate, isOver, happenedLabel, minutes, localize, tzCity } from '../dates.js';
 import { resizeImage } from '../photo.js';
 
@@ -100,7 +101,7 @@ function materialsCard(l) {
 function hostCard(l) {
   const h = l.host;
   return html`<section class="card host-card">
-    ${avatar(h, 56, { font: 19 })}
+    ${withFollow(h, avatar(h, 56, { font: 19 }), 56)}
     <div class="grow stack-4">
       <span class="small muted">${t('lesson.taughtBy')}</span>
       <strong class="display h-19"><bdi>${l.isHost ? t('lesson.youSuffix', { name: h.name }) : h.name}</bdi></strong>
@@ -147,7 +148,7 @@ function goingCard(l, over) {
   return html`<section class="card pad-18 stack-14">
     <div class="row-between gap-10">
       <div class="faces">
-        ${shown.map((u) => avatar(u, 38, { cls: 'face', title: u.name, font: 12 }))}
+        ${shown.map((u) => withFollow(u, avatar(u, 38, { cls: 'face', title: u.name, font: 12 }), 38))}
         ${extra > 0 ? html`<span class="avatar face more" style="width:38px;height:38px">+${extra}</span>` : ''}
       </div>
       <span class="going-count stack-2">${l.goingCount ? t('lesson.goingN', { n: l.goingCount }) : over ? t('lesson.nobody') : t('lesson.beFirst')}${seatLine}</span>
@@ -195,7 +196,7 @@ function questionsCard(l) {
     <h2 class="display h-19 row gap-8">${icon('bubbles', 22)}${l.isHost ? t('lesson.questionsHost') : t('lesson.questions', { name: l.host.firstName })}</h2>
     ${l.questions.length ? html`<ul class="plain stack-12">${l.questions.map((q) => html`<li class="question">
       <div class="row gap-10">
-        ${avatar(q.author, 32, { font: 11 })}
+        ${withFollow(q.author, avatar(q.author, 32, { font: 11 }), 32)}
         <span class="grow min0 stack-2">
           <strong class="small">${q.author.id === app.me.id ? t('common.you') : q.author.firstName}</strong>
           <span class="body-2 pre-line" dir="auto">${q.body}</span>
@@ -439,7 +440,7 @@ export const lesson = {
 
 function noteCard(n) {
   return html`<div class="card note-card">
-    ${avatar(n.author, 36, { font: 12 })}
+    ${withFollow(n.author, avatar(n.author, 36, { font: 12 }), 36)}
     <span class="stack-4 grow">
       <strong class="small">${n.author.id === app.me.id ? t('common.you') : n.author.firstName}</strong>
       ${n.reactions.length ? html`<span class="mini-chips">${n.reactions.map((r) => html`<span>${reactionLabel(r)}</span>`)}</span>` : ''}

@@ -6,6 +6,10 @@ import {
   randomCode, userCols, userFrom, requireClub, currentClub, TOPICS, rateLimit, isNewAccount, hasLink, isOwner
 } from './lib.js';
 import { LESSON_COLS, lessonBasics, VISIBLE } from './accounts.js';
+import { notify } from './notify.js';
+import { canEmail, sendVideoLessonEmail } from './email.js';
+import { emailBudget } from './reminders.js';
+import { suggestedVideos } from './videos.js';
 
 const FORMATS = ['talk', 'demo', 'disc', 'show', 'read'];
 const LENGTHS = [5, 10, 15, 20, 25, 30];
@@ -230,10 +234,17 @@ export async function createLesson(request, env, me) {
   const row = await env.DB.prepare(
     `INSERT INTO lessons (host_id, club_id, room, parent_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ${COLUMNS.split(',').map(() => '?').join(', ')}) RETURNING id`
   ).bind(me.id, club ? club.id : null, `TeachClub-${randomCode(12)}`, parentId, ...values(v)).first();
-  // Teaching someone's wish? Mark it as taken.
+  // Teaching someone's wish? Mark it as taken and tell whoever asked or voted.
   if (b.wishId && club) {
-    await env.DB.prepare('UPDATE wishes SET lesson_id = ? WHERE id = ? AND club_id = ? AND lesson_id IS NULL').bind(row.id, Number(b.wishId), club.id).run();
+    const wishId = Number(b.wishId);
+    const took = await env.DB.prepare('UPDATE wishes SET lesson_id = ? WHERE id = ? AND club_id = ? AND lesson_id IS NULL').bind(row.id, wishId, club.id).run();
+    if (took.meta.changes) {
+      const { results } = await env.DB.prepare('SELECT user_id FROM wishes WHERE id = ?1 UNION SELECT user_id FROM wish_votes WHERE wish_id = ?1').bind(wishId).all();
+      await notify(env, results.map((r) => r.user_id), { type: 'wish_taught', actor: me.id, lessonId: row.id });
+    }
   }
+  // Turning your own video into a lesson: link them, and tell everyone who said they'd join.
+  if (b.videoId) await videoBecameLesson(env, me, Number(b.videoId), row.id);
   return json({ id: row.id }, 201);
 }
 
@@ -243,8 +254,12 @@ export async function updateLesson(request, env, me, id) {
   const v = lessonInput(await readJson(request), me);
   if (!row.club_id) v.visibility = 'followers';
   await env.DB.prepare(`UPDATE lessons SET ${COLUMNS.split(', ').map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).bind(...values(v), id).run();
-  // A new time means new reminders.
-  await env.DB.prepare('DELETE FROM sent_reminders WHERE lesson_id = ?').bind(id).run();
+  // A new time means new reminders, and a heads-up for everyone signed up (only for changes that matter to them).
+  const moved = v.startsAt !== row.starts_at;
+  if (moved) await env.DB.prepare('DELETE FROM sent_reminders WHERE lesson_id = ?').bind(id).run();
+  if (moved || v.length !== row.length || v.mode !== row.mode || v.place !== row.place || v.classLink !== row.class_link) {
+    await notify(env, await attendeeIds(env, id), { type: 'lesson_changed', actor: me.id, lessonId: id });
+  }
   return json({ id });
 }
 
@@ -252,8 +267,43 @@ export async function updateLesson(request, env, me, id) {
 export async function deleteLesson(env, me, id) {
   const row = await lessonFor(env, me, id);
   if (!row.isHost && !row.isAdmin && !row.isOwner) throw new HttpError(403, 'Only the person teaching can change this lesson.');
+  const people = row.starts_at + row.length * 60000 > Date.now() ? await attendeeIds(env, id) : [];
   await env.DB.prepare('DELETE FROM lessons WHERE id = ?').bind(id).run();
+  // The lesson is gone, so the title travels with the notification.
+  await notify(env, people, { type: 'lesson_cancelled', actor: row.host_id, data: { title: row.title } });
   return json({ ok: true });
+}
+
+// Everyone who said yes or is on the waitlist.
+async function attendeeIds(env, lessonId) {
+  const { results } = await env.DB.prepare('SELECT user_id FROM rsvps WHERE lesson_id = ?').bind(lessonId).all();
+  return results.map((r) => r.user_id);
+}
+
+async function videoBecameLesson(env, me, videoId, lessonId) {
+  const video = await env.DB.prepare('SELECT id, title FROM videos WHERE id = ? AND user_id = ?').bind(videoId, me.id).first();
+  if (!video) return;
+  await env.DB.prepare('UPDATE videos SET lesson_id = ? WHERE id = ?').bind(lessonId, videoId).run();
+  const { results } = await env.DB.prepare(
+    `SELECT u.id, u.name, u.email, u.lang, u.tz, u.notify_off FROM video_interest i JOIN users u ON u.id = i.user_id
+     WHERE i.video_id = ? AND u.banned = 0 AND u.id != ?`
+  ).bind(videoId, me.id).all();
+  await notify(env, results.map((u) => u.id), { type: 'video_lesson', actor: me.id, lessonId, videoId });
+  // Also an email (the only one besides reminders), within the shared daily email budget.
+  if (!canEmail(env)) return;
+  let budget = await emailBudget(env);
+  const lesson = await env.DB.prepare('SELECT id, title, starts_at FROM lessons WHERE id = ?').bind(lessonId).first();
+  const appUrl = (env.APP_URL || '').replace(/\/+$/, '');
+  for (const u of results) {
+    if (budget <= 0) break;
+    if (parseJson(u.notify_off, []).includes('videos')) continue;
+    const ok = await sendVideoLessonEmail(env, { user: u, video: video.title, lesson, teacher: me.name, appUrl });
+    if (ok) {
+      await env.DB.prepare('INSERT OR IGNORE INTO sent_reminders (lesson_id, user_id, kind, sent_at) VALUES (?, ?, ?, ?)')
+        .bind(lessonId, u.id, 'video_lesson', Date.now()).run();
+      budget--;
+    }
+  }
 }
 
 export async function archiveLesson(request, env, me, id) {
@@ -275,6 +325,11 @@ export async function setRsvp(env, me, id, on) {
       const taken = await env.DB.prepare('SELECT COUNT(*) AS n FROM rsvps WHERE lesson_id = ? AND waitlist = 0').bind(id).first();
       const wait = row.seats > 0 && taken.n >= row.seats ? 1 : 0;
       await env.DB.prepare('INSERT OR IGNORE INTO rsvps (lesson_id, user_id, waitlist) VALUES (?, ?, ?)').bind(id, me.id, wait).run();
+      if (!wait) {
+        // Saying yes, no, yes again doesn't ping the teacher twice.
+        const again = await env.DB.prepare("SELECT 1 FROM notifications WHERE user_id = ? AND actor_id = ? AND lesson_id = ? AND type = 'rsvp'").bind(row.host_id, me.id, id).first();
+        if (!again) await notify(env, row.host_id, { type: 'rsvp', actor: me.id, lessonId: id });
+      }
       return json({ status: wait ? 'waitlist' : 'going' });
     }
     return json({ status: existing.waitlist ? 'waitlist' : 'going' });
@@ -282,9 +337,10 @@ export async function setRsvp(env, me, id, on) {
   const was = await env.DB.prepare('SELECT waitlist FROM rsvps WHERE lesson_id = ? AND user_id = ?').bind(id, me.id).first();
   await env.DB.prepare('DELETE FROM rsvps WHERE lesson_id = ? AND user_id = ?').bind(id, me.id).run();
   if (was && !was.waitlist) {
-    await env.DB.prepare(
-      'UPDATE rsvps SET waitlist = 0 WHERE lesson_id = ?1 AND user_id = (SELECT user_id FROM rsvps WHERE lesson_id = ?1 AND waitlist = 1 ORDER BY created_at LIMIT 1)'
-    ).bind(id).run();
+    const up = await env.DB.prepare(
+      'UPDATE rsvps SET waitlist = 0 WHERE lesson_id = ?1 AND user_id = (SELECT user_id FROM rsvps WHERE lesson_id = ?1 AND waitlist = 1 ORDER BY created_at LIMIT 1) RETURNING user_id'
+    ).bind(id).first();
+    if (up) await notify(env, up.user_id, { type: 'waitlist_up', lessonId: id });
   }
   return json({ status: null });
 }
@@ -296,21 +352,24 @@ export async function saveNote(request, env, me, id) {
   const reactions = Array.isArray(b.reactions) ? [...new Set(b.reactions.filter((r) => REACTIONS.includes(r)))] : [];
   const body = text(b.body, 'Your note', { max: 500 });
   if (!reactions.length && !body) throw new HttpError(400, 'Pick a reaction or write a line first.');
+  const first = !(await env.DB.prepare('SELECT 1 FROM notes WHERE lesson_id = ? AND user_id = ?').bind(id, me.id).first());
   await env.DB.prepare(
     `INSERT INTO notes (lesson_id, user_id, reactions, body) VALUES (?, ?, ?, ?)
      ON CONFLICT (lesson_id, user_id) DO UPDATE SET reactions = excluded.reactions, body = excluded.body`
   ).bind(id, me.id, JSON.stringify(reactions), body).run();
+  if (first) await notify(env, row.host_id, { type: 'note', actor: me.id, lessonId: id });
   return json({ ok: true });
 }
 
 // ---------- questions before the lesson ----------
 
 export async function askQuestion(request, env, me, id) {
-  await lessonFor(env, me, id);
+  const row = await lessonFor(env, me, id);
   await rateLimit(env, `questions:${me.id}`, 30, 3600);
   const body = text((await readJson(request)).body, 'Question', { max: 280, required: true });
   if (isNewAccount(me) && hasLink(body)) throw new HttpError(400, "New accounts can't add links yet. Try again in a few days.");
   await env.DB.prepare('INSERT INTO questions (lesson_id, user_id, body) VALUES (?, ?, ?)').bind(id, me.id, body).run();
+  await notify(env, row.host_id, { type: 'question', actor: me.id, lessonId: id });
   return json({ ok: true }, 201);
 }
 
@@ -322,10 +381,12 @@ async function questionFor(env, me, qid) {
 }
 
 export async function answerQuestion(request, env, me, qid) {
-  const { lesson } = await questionFor(env, me, qid);
+  const { q, lesson } = await questionFor(env, me, qid);
   requireHost(lesson);
   const answer = text((await readJson(request)).answer, 'Reply', { max: 500 });
+  const had = await env.DB.prepare("SELECT answer FROM questions WHERE id = ?").bind(qid).first();
   await env.DB.prepare('UPDATE questions SET answer = ? WHERE id = ?').bind(answer, qid).run();
+  if (answer && !(had && had.answer)) await notify(env, q.user_id, { type: 'answer', actor: me.id, lessonId: q.lesson_id });
   return json({ ok: true });
 }
 
@@ -421,7 +482,7 @@ export async function forYou(env, me) {
     return { lesson: l, score, reasons: reasons.slice(0, 2) };
   });
   const top = scored.filter((s) => s.score >= 2).sort((a, b) => b.score - a.score || a.lesson.startsAt - b.lesson.startsAt).slice(0, 8);
-  return json({ suggestions: top });
+  return json({ suggestions: top, videos: await suggestedVideos(env, me) });
 }
 
 // ---------- Wrapped: the year so far, for the club and for you ----------

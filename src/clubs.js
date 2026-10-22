@@ -3,10 +3,20 @@
 import {
   HttpError, json, readJson, text, randomCode, userCols, userFrom, currentClub, requireClub, roleIn, rateLimit, isOwner
 } from './lib.js';
+import { reportTarget, autoHide, unhideAfterReview } from './videos.js';
 
 const AUTO_HIDE_REPORTS = 3; // a lesson reported by this many different people is hidden until reviewed
 
 const clubOut = (c) => ({ id: c.id, name: c.name, role: c.role });
+
+// Reports about a video or a comment on one (shared with the site owner's report list).
+export const REPORT_MEDIA_COLS = `r.video_id, rv.title AS video_title, rv.hidden AS video_hidden,
+  r.comment_id, rc.body AS comment_body, rc.video_id AS comment_video_id, rc.hidden AS comment_hidden, rc.user_id AS comment_author_id`;
+export const REPORT_MEDIA_JOINS = 'LEFT JOIN videos rv ON rv.id = r.video_id LEFT JOIN video_comments rc ON rc.id = r.comment_id';
+export const reportMedia = (r) => ({
+  video: r.video_id ? { id: r.video_id, title: r.video_title, hidden: !!r.video_hidden } : null,
+  comment: r.comment_id ? { id: r.comment_id, body: r.comment_body, videoId: r.comment_video_id, hidden: !!r.comment_hidden, authorId: r.comment_author_id } : null
+});
 
 export async function listClubs(env, me) {
   const { results } = await env.DB.prepare(
@@ -49,8 +59,9 @@ export async function clubDetail(env, me) {
     ).bind(club.id),
     env.DB.prepare(
       `SELECT r.id, r.reason, r.details, r.created_at, r.lesson_id, l.title AS lesson_title, r.user_id AS target_id,
-         t.name AS target_name, p.name AS reporter_name
+         t.name AS target_name, p.name AS reporter_name, ${REPORT_MEDIA_COLS}
        FROM reports r LEFT JOIN lessons l ON l.id = r.lesson_id LEFT JOIN users t ON t.id = r.user_id LEFT JOIN users p ON p.id = r.reporter_id
+         ${REPORT_MEDIA_JOINS}
        WHERE r.club_id = ? AND r.resolved = 0 AND ? ORDER BY r.created_at DESC LIMIT 50`
     ).bind(club.id, isAdmin ? 1 : 0)
   ]);
@@ -62,6 +73,7 @@ export async function clubDetail(env, me) {
       id: r.id, reason: r.reason, details: r.details, at: r.created_at,
       lesson: r.lesson_id ? { id: r.lesson_id, title: r.lesson_title } : null,
       member: r.target_id ? { id: r.target_id, name: r.target_name } : null,
+      ...reportMedia(r),
       reporter: r.reporter_name || ''
     }))
   });
@@ -145,6 +157,14 @@ export async function createReport(request, env, me) {
   let clubId;
   let lessonId = null;
   let userId = null;
+  if (b.videoId || b.commentId) {
+    // Videos and comments: only people who can see them may report. Follower-only ones go to the site owner.
+    const target = await reportTarget(env, me, b);
+    await env.DB.prepare('INSERT INTO reports (club_id, reporter_id, video_id, comment_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(target.clubId, me.id, target.videoId, target.commentId, b.reason, details).run();
+    await autoHide(env, target);
+    return json({ ok: true }, 201);
+  }
   if (b.lessonId) {
     const lesson = await env.DB.prepare('SELECT club_id, host_id FROM lessons WHERE id = ?').bind(Number(b.lessonId)).first();
     // Only people who can actually see the lesson may report it (so outsiders can't gang up to hide it).
@@ -184,5 +204,6 @@ export async function resolveReport(env, me, reportId) {
   await env.DB.prepare(
     'UPDATE lessons SET hidden = 0 WHERE id = (SELECT lesson_id FROM reports WHERE id = ?1) AND NOT EXISTS (SELECT 1 FROM reports WHERE lesson_id = lessons.id AND resolved = 0)'
   ).bind(reportId).run();
+  await unhideAfterReview(env, reportId);
   return json({ ok: true });
 }

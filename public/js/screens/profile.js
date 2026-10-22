@@ -8,12 +8,14 @@ import { t, tp, th, lang, setLang } from '../i18n.js';
 import { avatar, icon, bottomNav, toast, busy, initialsOf } from '../ui.js';
 import { monShort, parse, isOver, memberSince, minutes, localize } from '../dates.js';
 import { resizePhoto } from '../photo.js';
+import { videoGrid } from '../videos.js';
 import { isInstalled, isIOS, canPrompt, promptInstall, onInstallChange } from '../install.js';
 
 onInstallChange(() => {
   if (document.getElementById('install-card')) render();
 });
 
+const NOTIFY_GROUPS = ['people', 'my_lessons', 'joined_lessons', 'videos', 'wishes'];
 const TOPIC_KEYS = ['cooking', 'tech', 'languages', 'art', 'music', 'science', 'sports', 'health', 'money', 'books', 'games', 'crafts', 'travel', 'career', 'history', 'nature'];
 
 function installCard() {
@@ -96,14 +98,14 @@ export const profile = {
     data.hosted.forEach(localize);
     data.archivedLessons.forEach(localize);
     data.attended.forEach(localize);
-    if (data.isMe) app.me = data.user;
-    return { ...data, tab: 'taught' };
+    if (data.isMe) app.me = { ...app.me, ...data.user };
+    return { ...data, tab: 'taught', videos: null };
   },
   view(s) {
     const u = s.user;
     const taught = s.hosted.filter(isOver).length;
     const attended = s.attended.filter(isOver).length;
-    const list = s.tab === 'taught' ? s.hosted : s.attended;
+    const list = s.tab === 'taught' ? s.hosted : s.tab === 'attended' ? s.attended : [];
     const tab = (key, label) => html`<button role="tab" class="${s.tab === key ? 'on' : ''}" aria-selected="${s.tab === key ? 'true' : 'false'}" data-action="tab" data-tab="${key}">${label}</button>`;
     const empty = s.tab === 'taught'
       ? html`<div class="empty-day"><span class="muted">${s.isMe ? t('profile.emptyTaughtMe') : t('profile.emptyTaughtOther', { name: u.firstName })}</span>${s.isMe ? html`<a class="btn btn-soft btn-sm mt-4" href="/create/new">${t('nav.teach')}</a>` : ''}</div>`
@@ -156,9 +158,15 @@ export const profile = {
   </a>` : ''}
 
   <section class="mx-16 mt-20">
-    <div class="tabs" role="tablist" aria-label="${t('profile.lessons')}">${tab('taught', t('profile.tabTaught'))}${tab('attended', t('profile.tabAttended'))}</div>
+    <div class="tabs three" role="tablist" aria-label="${t('profile.lessons')}">${tab('taught', t('profile.tabTaught'))}${tab('attended', t('profile.tabAttended'))}${tab('videos', t('explore.videos'))}</div>
     <div role="tabpanel" class="stack-10 mt-12">
-      ${list.length ? list.map((l) => lessonRow(l, s.tab === 'taught' ? taughtMeta(l) : attendedMeta(l))) : empty}
+      ${s.tab === 'videos'
+        ? s.videos === null
+          ? html`<div class="loading small-loading" role="status"><span class="spinner"></span></div>`
+          : s.videos.length
+            ? videoGrid(s.videos, { showAuthor: false })
+            : html`<div class="empty-day"><span class="muted">${s.isMe ? t('video.emptyMine') : t('video.emptyOther', { name: u.firstName })}</span>${s.isMe ? html`<a class="btn btn-soft btn-sm mt-4" href="/videos/new">${t('explore.share')}</a>` : ''}</div>`
+        : list.length ? list.map((l) => lessonRow(l, s.tab === 'taught' ? taughtMeta(l) : attendedMeta(l))) : empty}
     </div>
   </section>
 
@@ -178,13 +186,18 @@ export const profile = {
 </div>`;
   },
   actions: {
-    tab(s, el) {
+    async tab(s, el) {
       s.tab = el.dataset.tab;
       render();
+      if (s.tab === 'videos' && s.videos === null) {
+        s.videos = (await api(`/videos?user=${s.user.id}`)).videos;
+        render();
+      }
     },
     async follow(s) {
       const { follow } = await api(`/users/${s.user.id}/follow`, { method: 'POST' });
       s.follow = follow;
+      (follow === 'pending' ? app.requested : app.following).add(s.user.id);
       if (follow === 'accepted') s.followers += 1;
       render();
     },
@@ -192,17 +205,23 @@ export const profile = {
       const was = s.follow;
       await api(`/users/${s.user.id}/follow`, { method: 'DELETE' });
       s.follow = null;
+      app.following.delete(s.user.id);
+      app.requested.delete(s.user.id);
       if (was === 'accepted') s.followers = Math.max(0, s.followers - 1);
       render();
     },
     async block(s) {
       if (!window.confirm(t('social.blockConfirm', { name: s.user.firstName }))) return;
       await api(`/users/${s.user.id}/block`, { method: 'POST' });
+      app.blocked.add(s.user.id);
+      app.following.delete(s.user.id);
+      app.requested.delete(s.user.id);
       toast(t('social.blocked'));
       navigate(`/u/${s.user.id}`, { replace: true });
     },
     async unblock(s) {
       await api(`/users/${s.user.id}/block`, { method: 'DELETE' });
+      app.blocked.delete(s.user.id);
       toast(t('social.unblocked'));
       navigate(`/u/${s.user.id}`, { replace: true });
     },
@@ -266,8 +285,12 @@ export const editProfile = {
   title: () => t('edit.title'),
   load: () => ({
     name: app.me.name, bio: app.me.bio, email: app.me.email, newPhoto: undefined, reminders: app.me.emailReminders !== false,
-    interests: (app.me.interests || []).slice(), approve: !!app.me.approveFollowers
+    interests: (app.me.interests || []).slice(), approve: !!app.me.approveFollowers, notifyOff: (app.me.notifyOff || []).slice()
   }),
+  after() {
+    // Opened from the bell's "Notification settings": jump to that card (after the router scrolls to the top).
+    if (location.hash === '#notify') setTimeout(() => document.getElementById('notify')?.scrollIntoView({ block: 'start' }), 0);
+  },
   view: (s) => html`
 <div class="screen">
   <header class="edit-head">
@@ -319,6 +342,16 @@ export const editProfile = {
       </label>
     </section>
 
+    <section class="card pad-18 stack-12" id="notify">
+      <h2 class="h-16 row gap-8">${icon('bell', 18)}${t('notif.settingsTitle')}</h2>
+      <span class="hint">${t('notif.settingsHint')}</span>
+      ${NOTIFY_GROUPS.map((g) => html`<label class="toggle-row">
+        <span class="grow stack-2"><strong>${t(`notif.groups.${g}`)}</strong><span class="small muted">${t(`notif.groupHints.${g}`)}</span></span>
+        <input type="checkbox" class="switch" data-input="notify" data-g="${g}" ${s.notifyOff.includes(g) ? '' : raw('checked')}>
+      </label>`)}
+      <span class="tiny muted">${t('notif.emailNote')}</span>
+    </section>
+
     <section class="stack-8 pad-x-4">
       <a class="small strong row gap-6" href="/privacy">${icon('shield', 16)}${t('edit.privacy')}</a>
       <a class="small strong row gap-6 danger-link" href="/account/delete">${icon('trash', 16)}${t('edit.remove')}</a>
@@ -347,6 +380,10 @@ export const editProfile = {
     },
     approve(s, el) {
       s.approve = el.checked;
+    },
+    notify(s, el) {
+      const g = el.dataset.g;
+      s.notifyOff = el.checked ? s.notifyOff.filter((x) => x !== g) : s.notifyOff.concat(g);
     }
   },
   changes: {
@@ -379,7 +416,7 @@ export const editProfile = {
     async save(s, button) {
       if (!s.name.trim()) return toast(t('edit.nameEmpty'));
       busy(button, true, t('common.saving'));
-      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto, emailReminders: s.reminders, interests: s.interests, approveFollowers: s.approve } });
+      const { user } = await api('/me', { method: 'PUT', body: { name: s.name, bio: s.bio, email: s.email, photo: s.newPhoto, emailReminders: s.reminders, interests: s.interests, approveFollowers: s.approve, notifyOff: s.notifyOff } });
       app.me = user;
       toast(t('edit.saved'));
       navigate('/profile', { replace: true });

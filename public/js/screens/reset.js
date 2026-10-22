@@ -2,7 +2,7 @@
 
 import { html } from '../html.js';
 import { api } from '../api.js';
-import { app, navigate, render } from '../core.js';
+import { app, applyMe, navigate, render } from '../core.js';
 import { t } from '../i18n.js';
 import { icon, toast, busy, showError, langToggle } from '../ui.js';
 import { humanCheck, humanCheckOn, resetHumanCheck } from '../turnstile.js';
@@ -111,10 +111,8 @@ export const reset = {
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('reset.busy'));
       try {
-        const { user, club, owner } = await api('/reset', { method: 'POST', body: { token: s.token, password } });
-        app.me = user;
-        app.club = club;
-        app.owner = !!owner;
+        await api('/reset', { method: 'POST', body: { token: s.token, password } });
+        applyMe(await api('/me'));
         toast(t('reset.done'));
         navigate('/', { replace: true });
       } catch (err) {

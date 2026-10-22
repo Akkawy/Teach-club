@@ -11,7 +11,28 @@ import { t, setLang } from './i18n.js';
 
 // me: the logged-in member; club: their current club ({ id, name, role }) or null.
 // owner: the site owner (sees every report); config: public settings from the server.
-export const app = { me: null, club: null, owner: false, followRequests: 0, config: {} };
+// following / requested / blocked: member ids, for the quick-follow ➕ on avatars. unread: the bell's count.
+export const app = {
+  me: null, club: null, owner: false, followRequests: 0, config: {},
+  following: new Set(), requested: new Set(), blocked: new Set(), unread: 0
+};
+
+// Takes what GET /api/me returns.
+export function applyMe(d) {
+  app.me = d.user;
+  app.club = d.club;
+  app.owner = !!d.owner;
+  app.followRequests = d.followRequests || 0;
+  app.following = new Set(d.following || []);
+  app.requested = new Set(d.requested || []);
+  app.blocked = new Set(d.blocked || []);
+  app.unread = d.unread || 0;
+}
+
+// Other modules can add actions that work on every screen (like the quick-follow ➕).
+export function addGlobalActions(actions) {
+  Object.assign(globalActions, actions);
+}
 
 // Remembers an invite link opened before logging in, so joining happens right after.
 const INVITE_KEY = 'tc_invite';

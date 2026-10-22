@@ -2,7 +2,7 @@
 
 import { html, raw } from '../html.js';
 import { api } from '../api.js';
-import { app, navigate, render, afterAuth } from '../core.js';
+import { app, applyMe, navigate, render, afterAuth } from '../core.js';
 import { t, setLang } from '../i18n.js';
 import { avatar, brand, icon, initialsOf, toast, busy, showError, langToggle } from '../ui.js';
 import { resizePhoto } from '../photo.js';
@@ -66,10 +66,8 @@ export const login = {
       const button = form.querySelector('[type=submit]');
       busy(button, true, t('login.busy'));
       try {
-        const { user, club, owner } = await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
-        app.me = user;
-        app.club = club;
-        app.owner = !!owner;
+        await api('/login', { method: 'POST', body: { email: data.email, password: data.password } });
+        applyMe(await api('/me'));
         navigate(afterAuth(s.next), { replace: true });
       } catch (err) {
         busy(button, false);
@@ -213,8 +211,7 @@ export const signup = {
           method: 'POST',
           body: { name: data.name, email: data.email, password: data.password, bio: data.bio, photo: s.photo, agree: true, turnstile }
         });
-        app.me = user;
-        app.club = null;
+        applyMe({ user, club: null });
         navigate(afterAuth('/welcome'), { replace: true });
       } catch (err) {
         busy(button, false);

@@ -9,7 +9,7 @@ Anyone can sign up.
 | --- | --- |
 | `public/` | The website: the pages, styles and logo |
 | `public/manifest.webmanifest`, `public/sw.js`, `public/icons/` | What makes it installable as a phone app |
-| `src/` | The server: `worker.js` (routes), `accounts.js`, `clubs.js`, `lessons.js`, `wishes.js`, `reminders.js`, `email.js`, `previews.js`, `lib.js` |
+| `src/` | The server: `worker.js` (routes), `accounts.js`, `clubs.js`, `lessons.js`, `social.js`, `videos.js`, `notify.js`, `wishes.js`, `reminders.js`, `email.js`, `previews.js`, `lib.js` |
 | `migrations/` | The database tables, one file per update (applied in order) |
 | `public/og/` | The pictures shown when a lesson or invite link is shared |
 | `wrangler.jsonc` | Cloudflare settings (app name, database link) |
@@ -120,6 +120,16 @@ Updates arrive by themselves: deploy a change, and the app picks it up the next 
 - **Teacher's private notes** per part of the plan, shown in presenter mode. **Material links** (slides, docs, videos) for people going, and everyone after the lesson.
 - **Archive** old lessons (only the teacher still sees them). **Topics** + interests power the **For you** row.
 - After sign-up, people get an **Add to home screen** step (with a warning when opened inside WhatsApp/Instagram-style browsers).
+
+### Explore, videos, notifications and quick follow
+
+- **Explore** (bottom menu) has two tabs: **Videos** and **Wishes** (the old wishlist).
+- **Videos are links only** (YouTube, TikTok, Instagram, Vimeo, Google Drive; anything else shows as a card). Nothing is uploaded or stored, so it stays free. The player loads from that site only after you tap play (YouTube uses its privacy-friendly "no cookie" player).
+  - Others can tap **"I'd join a lesson on this"** and **comment**. The owner can **Turn into a lesson**: the video comes along as a material link, and everyone who said they'd join gets a notification and one email.
+  - Same safety as lessons: reports (3 reports hide a video or comment until reviewed), accounts younger than 3 days can't share videos, daily limits, and *My club* / *Club + followers* visibility. Follower-only videos are reviewed by the site owner.
+  - Each profile has a **Videos** tab, and good matches show up in **For you**.
+- **Notifications (the bell):** follows, follow requests, people joining your lessons, questions, thank-you notes, answers, lesson changes and cancellations, waitlist seats, video comments and "I'd join" taps, and wishes being taught. Similar ones are grouped ("Sara and 4 others…"). Each kind can be switched off in **Edit profile → Notifications**. Old notifications are cleaned up after 60 days.
+- **Quick follow:** a small ➕ on people's faces (lesson cards, videos, comments, club members, attendees) follows in one tap, with **Undo**. Explore → Videos starts with **People to follow**.
 
 ## Good to know
 

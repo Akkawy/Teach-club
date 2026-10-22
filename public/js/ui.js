@@ -37,6 +37,7 @@ const PATHS = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   sparkle: '<path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   play: '<path d="M7 5v14l12-7z"/>',
+  playVideo: '<path d="M7 5v14l12-7z"/>', // like play, but never mirrored: video players point right in every language
   pause: '<path d="M8 5v14M16 5v14"/>',
   skip: '<path d="M6 5v14l9-7z"/><path d="M18 5v14"/>',
   back: '<path d="M18 5v14l-9-7z"/><path d="M6 5v14"/>',
@@ -51,11 +52,15 @@ const PATHS = {
   pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
   archive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/>',
-  note: '<path d="M5 4h14v12l-4 4H5z"/><path d="M15 20v-4h4M9 9h6M9 13h4"/>'
+  note: '<path d="M5 4h14v12l-4 4H5z"/><path d="M15 20v-4h4M9 9h6M9 13h4"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  hand: '<path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6.5 7S5 17.5 4 15l-1.5-3a1.5 1.5 0 0 1 2.6-1.5L7 13"/>',
+  send: '<path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/>'
 };
 
 // Arrows mirror in Arabic so "back" still points the way you came.
-const MIRROR = new Set(['chevronLeft', 'chevronRight', 'skip', 'back', 'play']);
+const MIRROR = new Set(['chevronLeft', 'chevronRight', 'skip', 'back', 'play', 'send', 'external']);
 
 export function icon(name, size = 20, width = 2) {
   const cls = MIRROR.has(name) ? 'i mirror' : 'i';
@@ -105,7 +110,7 @@ export function bottomNav(active) {
   const item = (key, href, ic, label) => html`<a href="${href}" class="nav-item ${active === key ? 'on' : ''}" ${active === key ? raw('aria-current="page"') : ''}>${icon(ic, 24)}${label}</a>`;
   return html`<nav class="bottom-nav" aria-label="${t('nav.main')}">
     ${item('calendar', '/', 'calendar', t('nav.calendar'))}
-    ${item('wishes', '/wishes', 'sparkle', t('nav.wishes'))}
+    ${item('explore', '/explore', 'compass', t('nav.explore'))}
     <a href="/create/new" class="nav-fab" aria-label="${t('nav.teach')}">${icon('plus', 26, 2.4)}</a>
     ${item('club', '/club', 'users', t('nav.club'))}
     ${item('profile', '/profile', 'user', t('nav.profile'))}
@@ -126,11 +131,12 @@ export function desktopHeader(active, me, extra = '') {
     <div class="dk-inner">
       ${brand()}
       <nav class="dk-nav" aria-label="${t('nav.main')}">
-        ${link('calendar', '/', t('nav.calendar'))}${link('wishes', '/wishes', t('nav.wishes'))}${link('club', '/club', t('nav.club'))}${link('profile', '/profile', t('nav.myLessons'))}
+        ${link('calendar', '/', t('nav.calendar'))}${link('explore', '/explore', t('nav.explore'))}${link('club', '/club', t('nav.club'))}${link('profile', '/profile', t('nav.myLessons'))}
       </nav>
       <div class="dk-right">
         ${extra}
         ${langToggle()}
+        ${bellLink()}
         <a class="btn btn-primary btn-sm" href="/create/new">${icon('plus', 20, 2.4)}${t('nav.teach')}</a>
         <a href="/profile" class="me-link" aria-label="${t('nav.yourProfile')}">${avatar(me, 44, { font: 15 })}</a>
       </div>
@@ -154,13 +160,42 @@ export function hostOf(url) {
   }
 }
 
+// The bell with the unread count. follow.js keeps every bell's number up to date.
+let unreadNow = 0;
+export function setUnreadForBells(n) {
+  unreadNow = n;
+  document.querySelectorAll('.bell-count').forEach((el) => {
+    el.textContent = n > 99 ? '99+' : String(n);
+    el.hidden = !n;
+  });
+  document.querySelectorAll('.bell-link').forEach((el) => el.setAttribute('aria-label', bellLabel(n)));
+}
+const bellLabel = (n) => (n ? `${t('nav.notifications')}, ${t('notif.unread', { n })}` : t('nav.notifications'));
+export function bellLink() {
+  const n = unreadNow;
+  return html`<a href="/notifications" class="icon-btn bell-link" aria-label="${bellLabel(n)}">${icon('bell', 22)}<span class="bell-count" ${n ? '' : raw('hidden')}>${n > 99 ? '99+' : n}</span></a>`;
+}
+
 let toastTimer;
-export function toast(message) {
+// undo: { label, run } shows a button in the toast (for example "Undo" after a quick follow).
+export function toast(message, undo) {
   const el = document.getElementById('toast');
   el.textContent = message;
+  el.classList.toggle('has-action', !!undo);
+  if (undo) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-action';
+    b.textContent = undo.label;
+    b.addEventListener('click', () => {
+      el.classList.remove('show');
+      undo.run();
+    }, { once: true });
+    el.append(' ', b);
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), undo ? 6000 : 3800);
 }
 
 export function busy(button, on, label) {

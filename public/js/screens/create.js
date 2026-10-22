@@ -41,7 +41,7 @@ function clearDraft() {
 }
 
 function newDraft(date) {
-  return { editId: null, date, time: '19:00', tz: browserTz, length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '', wishId: null, parentId: null, origin: '',
+  return { editId: null, date, time: '19:00', tz: browserTz, length: 20, title: '', pitch: '', format: 'talk', answers: {}, plan: null, classLink: '', surprise: false, prep: '', wishId: null, parentId: null, videoId: null, origin: '',
     mode: 'online', place: '', area: '', mapLink: '', seats: 0, publicPlace: false, visibility: 'club', tags: [], teacherNotes: [], materials: [] };
 }
 
@@ -229,7 +229,7 @@ function step2(s) {
   const openers = t('create.openers');
   return html`
 <div class="screen flow">
-  ${header(s, t('create.s2'), t('create.s2sub'), d.origin ? html`<span class="pill pill-soft">${icon(d.wishId ? 'sparkle' : 'link', 14)}<bdi>${d.origin}</bdi></span>` : '')}
+  ${header(s, t('create.s2'), t('create.s2sub'), d.origin ? html`<span class="pill pill-soft">${icon(d.wishId ? 'sparkle' : d.videoId ? 'playVideo' : 'link', 14)}<bdi>${d.origin}</bdi></span>` : '')}
   <main class="flow-main">
     <section class="card pad-16 stack-16">
       <div class="field">
@@ -500,7 +500,18 @@ export const create = {
       const draft = newDraft(isDate(date) && date >= today() ? date : today());
       const wishId = query.get('wish');
       const parentId = query.get('parent');
-      if (wishId) {
+      const videoId = query.get('video');
+      if (videoId) {
+        // Turning your own video into a lesson: the video comes along as a material link.
+        const { video } = await api(`/videos/${encodeURIComponent(videoId)}`);
+        if (video.isMine) {
+          Object.assign(draft, {
+            title: video.title.slice(0, 60), pitch: video.caption.slice(0, 90), videoId: video.id, origin: `${t('video.fromVideo')}: ${video.title}`,
+            tags: video.topic ? [video.topic] : [], materials: [{ url: video.url, title: video.title.slice(0, 80) }],
+            format: 'demo', visibility: video.visibility
+          });
+        }
+      } else if (wishId) {
         const { wish } = await api(`/wishes/${encodeURIComponent(wishId)}`);
         Object.assign(draft, { title: wish.title.slice(0, 60), wishId: wish.id, origin: `${t('create.fromWish')}: ${wish.title}` });
       } else if (parentId) {
@@ -683,7 +694,7 @@ export const create = {
       }
       const body = {
         title: d.title, pitch: d.pitch, format: d.format, date: d.date, time: d.time, tz: d.tz || browserTz, length: d.length,
-        wishId: d.wishId || undefined, parentId: d.parentId || undefined,
+        wishId: d.wishId || undefined, parentId: d.parentId || undefined, videoId: d.editId ? undefined : d.videoId || undefined,
         answers: answersOf(d), plan: buildPlan(d), classLink: d.mode === 'in_person' ? '' : d.classLink.trim(), surprise: d.surprise, prep: d.prep,
         mode: d.mode, place: d.place, area: d.area, mapLink: d.mapLink, seats: d.seats, publicPlace: d.publicPlace,
         visibility: app.club ? d.visibility : 'followers', tags: d.tags, materials: d.materials,

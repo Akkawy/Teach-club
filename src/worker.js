@@ -11,6 +11,8 @@ import {
 } from './lessons.js';
 import { follow, unfollow, listFollows, acceptFollower, removeFollower, block, unblock, ownerReports, setBanned } from './social.js';
 import { listWishes, createWish, getWish, voteWish, deleteWish } from './wishes.js';
+import { listVideos, createVideo, previewVideo, getVideo, deleteVideo, setInterest, addComment, deleteComment, suggestedPeople } from './videos.js';
+import { listNotifications, markAllRead, unreadCount } from './notify.js';
 import { sendReminders } from './reminders.js';
 import { pageWithPreview } from './previews.js';
 
@@ -82,6 +84,26 @@ async function route(request, env, url) {
     if (b === 'users' && isId(c) && d === 'ban' && is('DELETE')) return setBanned(env, me, Number(c), false);
   }
   if (a === 'for-you' && !b && is('GET')) return forYou(env, me);
+  if (a === 'people' && b === 'suggested' && !c && is('GET')) return suggestedPeople(env, me);
+
+  if (a === 'notifications' && !b && is('GET')) return listNotifications(env, me);
+  if (a === 'notifications' && b === 'unread' && !c && is('GET')) return json({ unread: await unreadCount(env, me) });
+  if (a === 'notifications' && b === 'read' && !c && is('POST')) return markAllRead(env, me);
+
+  if (a === 'videos') {
+    if (!b && is('GET')) return listVideos(env, me, url);
+    if (!b && is('POST')) return createVideo(request, env, me);
+    if (b === 'preview' && !c && is('POST')) return previewVideo(request, env, me);
+    if (isId(b)) {
+      const id = Number(b);
+      if (!c && is('GET')) return getVideo(env, me, id);
+      if (!c && is('DELETE')) return deleteVideo(env, me, id);
+      if (c === 'interest' && !d && is('POST')) return setInterest(env, me, id, true);
+      if (c === 'interest' && !d && is('DELETE')) return setInterest(env, me, id, false);
+      if (c === 'comments' && !d && is('POST')) return addComment(request, env, me, id);
+    }
+  }
+  if (a === 'comments' && isId(b) && !c && is('DELETE')) return deleteComment(env, me, Number(b));
   if (a === 'invites' && b && c === 'join' && is('POST')) return joinByInvite(env, me, b);
 
   if (a === 'clubs') {

@@ -5,7 +5,8 @@ import { api } from '../api.js';
 import { app, render, isWide } from '../core.js';
 import { fmt, ORDER } from '../formats.js';
 import { t, tp } from '../i18n.js';
-import { avatar, brand, icon, formatPill, dotPill, bottomNav, desktopHeader } from '../ui.js';
+import { avatar, brand, icon, formatPill, dotPill, bottomNav, desktopHeader, bellLink } from '../ui.js';
+import { withFollow } from '../follow.js';
 import { isInstalled, installBannerOff } from '../install.js';
 import { iso, parse, isDate, today, addDays, fmtTime, longDay, monthYear, wdShort, minutes, localize, dayStartMs } from '../dates.js';
 
@@ -55,11 +56,12 @@ function reasonText(r) {
   if (r.kind === 'topic') return t('feed.reasons.topic', { topic: t(`topics.${r.topic}`) });
   if (r.kind === 'friends') return tp('friendsGoing', r.n);
   if (r.kind === 'format') return t('feed.reasons.format', { format: fmt(r.format).label });
+  if (r.kind === 'wanted') return tp('wantLesson', r.n);
   return t(`feed.reasons.${r.kind}`, { name: r.name });
 }
 
 function forYouStrip(s) {
-  if (!s.forYou.length) return '';
+  if (!s.forYou.length && !s.forYouVideos.length) return '';
   return html`<section class="for-you">
     <h2 class="display h-20 pad-x-4 row gap-8">${icon('sparkle', 20)}${t('feed.forYou')}</h2>
     <div class="fy-row">${s.forYou.map(({ lesson: l, reasons }) => {
@@ -67,10 +69,15 @@ function forYouStrip(s) {
       return html`<a class="card fy-card" href="/lesson/${l.id}">
         <span class="fy-top" style="background:${f.bg};color:${f.fg}">${icon(f.icon, 16, 2.2)}<span>${shortWhen(l)}</span></span>
         <strong class="fy-title"><bdi>${l.title}</bdi></strong>
-        <span class="who small">${avatar(l.host, 22, { font: 9 })}${l.host.firstName}</span>
+        <span class="who small">${withFollow(l.host, avatar(l.host, 22, { font: 9 }), 22)}${l.host.firstName}</span>
         ${reasons[0] ? html`<span class="fy-why">${reasonText(reasons[0])}</span>` : ''}
       </a>`;
-    })}</div>
+    })}${s.forYouVideos.map(({ video: v, reasons }) => html`<a class="card fy-card fy-video" href="/video/${v.id}">
+        <span class="fy-thumb">${v.thumb ? html`<img src="${v.thumb}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<span class="fy-vlabel">${icon('playVideo', 14, 2.4)}${t('video.label')}</span></span>
+        <strong class="fy-title"><bdi>${v.title}</bdi></strong>
+        <span class="who small">${withFollow(v.author, avatar(v.author, 22, { font: 9 }), 22)}${v.author.firstName}</span>
+        ${reasons[0] ? html`<span class="fy-why">${reasonText(reasons[0])}</span>` : ''}
+      </a>`)}</div>
   </section>`;
 }
 
@@ -172,7 +179,7 @@ function mobileLesson(l) {
     <div class="lc-body">
       <span class="lc-title display"><bdi>${l.title}</bdi></span>
       <div class="lc-meta">
-        <span class="who">${avatar(l.host, 28, { font: 11 })}${who(l)}${goingTag(l)}</span>
+        <span class="who">${withFollow(l.host, avatar(l.host, 28, { font: 11 }), 28)}${who(l)}${goingTag(l)}</span>
         ${whereTag(l)}
         ${formatPill(l.format)}
       </div>
@@ -188,7 +195,10 @@ function mobileView(s) {
 <div class="screen with-nav">
   <header class="home-head">
     ${brand()}
-    <a href="/profile" class="me-link" aria-label="${t('nav.yourProfile')}">${avatar(app.me, 44, { font: 15 })}</a>
+    <span class="row gap-8">
+      ${bellLink()}
+      <a href="/profile" class="me-link" aria-label="${t('nav.yourProfile')}">${avatar(app.me, 44, { font: 15 })}</a>
+    </span>
   </header>
 
   <section class="home-hero">
@@ -243,7 +253,7 @@ function desktopLesson(l) {
       ${dotPill(l.format)}
     </div>
     <span class="display dk-title"><bdi>${l.title}</bdi></span>
-    <span class="who">${avatar(l.host, 28, { font: 11 })}${who(l)}${goingTag(l)}</span>
+    <span class="who">${withFollow(l.host, avatar(l.host, 28, { font: 11 }), 28)}${who(l)}${goingTag(l)}</span>
   </a>`;
 }
 
@@ -300,9 +310,10 @@ export const home = {
   async load({ query }) {
     const day = isDate(query.get('day')) ? query.get('day') : today();
     const d = parse(day);
-    const s = { y: d.getFullYear(), m: d.getMonth(), sel: day, lessons: [], forYou: [], scope: savedScope() };
+    const s = { y: d.getFullYear(), m: d.getMonth(), sel: day, lessons: [], forYou: [], forYouVideos: [], scope: savedScope() };
     const [, fy] = await Promise.all([fetchMonth(s), api('/for-you').catch(() => ({ suggestions: [] }))]);
     s.forYou = fy.suggestions.map((x) => ({ ...x, lesson: localize(x.lesson) }));
+    s.forYouVideos = fy.videos || [];
     return s;
   },
   view: (s) => (isWide() ? desktopView(s) : mobileView(s)),

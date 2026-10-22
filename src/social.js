@@ -1,6 +1,8 @@
 // Following people (one-way, with optional approval), blocking, and the site owner's moderation tools.
 
 import { HttpError, json, userCols, userFrom, rateLimit, blockedBetween, requireOwner } from './lib.js';
+import { notify } from './notify.js';
+import { REPORT_MEDIA_COLS, REPORT_MEDIA_JOINS, reportMedia } from './clubs.js';
 
 export async function follow(env, me, id) {
   if (id === me.id) throw new HttpError(400, "You can't follow yourself.");
@@ -8,7 +10,13 @@ export async function follow(env, me, id) {
   const target = await env.DB.prepare('SELECT approve_followers FROM users WHERE id = ? AND banned = 0').bind(id).first();
   if (!target || (await blockedBetween(env, me.id, id))) throw new HttpError(404, "We couldn't find that member.");
   const status = target.approve_followers ? 'pending' : 'accepted';
-  await env.DB.prepare('INSERT OR IGNORE INTO follows (follower_id, followee_id, status) VALUES (?, ?, ?)').bind(me.id, id, status).run();
+  const added = await env.DB.prepare('INSERT OR IGNORE INTO follows (follower_id, followee_id, status) VALUES (?, ?, ?)').bind(me.id, id, status).run();
+  // Following, unfollowing and following again within a day doesn't ping them twice.
+  if (added.meta.changes) {
+    const recent = await env.DB.prepare("SELECT 1 FROM notifications WHERE user_id = ? AND actor_id = ? AND type IN ('follow', 'follow_request') AND created_at > ?")
+      .bind(id, me.id, Date.now() - 864e5).first();
+    if (!recent) await notify(env, id, { type: status === 'pending' ? 'follow_request' : 'follow', actor: me.id });
+  }
   const row = await env.DB.prepare('SELECT status FROM follows WHERE follower_id = ? AND followee_id = ?').bind(me.id, id).first();
   return json({ follow: row.status });
 }
@@ -36,13 +44,20 @@ export async function listFollows(env, me) {
 }
 
 export async function acceptFollower(env, me, id) {
-  await env.DB.prepare("UPDATE follows SET status = 'accepted' WHERE follower_id = ? AND followee_id = ?").bind(id, me.id).run();
+  const done = await env.DB.prepare("UPDATE follows SET status = 'accepted' WHERE follower_id = ? AND followee_id = ? AND status = 'pending'").bind(id, me.id).run();
+  if (done.meta.changes) {
+    await notify(env, id, { type: 'follow_accepted', actor: me.id });
+    await env.DB.prepare("DELETE FROM notifications WHERE user_id = ? AND actor_id = ? AND type = 'follow_request'").bind(me.id, id).run();
+  }
   return json({ ok: true });
 }
 
 // Declines a request or removes an existing follower.
 export async function removeFollower(env, me, id) {
-  await env.DB.prepare('DELETE FROM follows WHERE follower_id = ? AND followee_id = ?').bind(id, me.id).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM follows WHERE follower_id = ? AND followee_id = ?').bind(id, me.id),
+    env.DB.prepare("DELETE FROM notifications WHERE user_id = ? AND actor_id = ? AND type = 'follow_request'").bind(me.id, id)
+  ]);
   return json({ ok: true });
 }
 
@@ -51,7 +66,8 @@ export async function block(env, me, id) {
   if (id === me.id) throw new HttpError(400, "You can't do that to yourself.");
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)').bind(me.id, id),
-    env.DB.prepare('DELETE FROM follows WHERE (follower_id = ?1 AND followee_id = ?2) OR (follower_id = ?2 AND followee_id = ?1)').bind(me.id, id)
+    env.DB.prepare('DELETE FROM follows WHERE (follower_id = ?1 AND followee_id = ?2) OR (follower_id = ?2 AND followee_id = ?1)').bind(me.id, id),
+    env.DB.prepare('DELETE FROM notifications WHERE user_id = ? AND actor_id = ?').bind(me.id, id)
   ]);
   return json({ ok: true });
 }
@@ -67,13 +83,15 @@ export async function ownerReports(env, me) {
   requireOwner(env, me);
   const { results } = await env.DB.prepare(
     `SELECT r.id, r.reason, r.details, r.created_at, r.lesson_id, l.title AS lesson_title, l.hidden AS lesson_hidden, l.host_id,
-       r.user_id AS target_id, t.name AS target_name, t.banned AS target_banned, p.name AS reporter_name, c.name AS club_name
-     FROM reports r JOIN clubs c ON c.id = r.club_id LEFT JOIN lessons l ON l.id = r.lesson_id LEFT JOIN users t ON t.id = r.user_id LEFT JOIN users p ON p.id = r.reporter_id
+       r.user_id AS target_id, t.name AS target_name, t.banned AS target_banned, p.name AS reporter_name, c.name AS club_name, ${REPORT_MEDIA_COLS}
+     FROM reports r LEFT JOIN clubs c ON c.id = r.club_id LEFT JOIN lessons l ON l.id = r.lesson_id LEFT JOIN users t ON t.id = r.user_id LEFT JOIN users p ON p.id = r.reporter_id
+       ${REPORT_MEDIA_JOINS}
      WHERE r.resolved = 0 ORDER BY r.created_at DESC LIMIT 200`
   ).all();
   return json({
     reports: results.map((r) => ({
-      id: r.id, reason: r.reason, details: r.details, at: r.created_at, club: r.club_name, reporter: r.reporter_name || '',
+      id: r.id, reason: r.reason, details: r.details, at: r.created_at, club: r.club_name || '', reporter: r.reporter_name || '',
+      ...reportMedia(r),
       lesson: r.lesson_id ? { id: r.lesson_id, title: r.lesson_title, hidden: !!r.lesson_hidden, hostId: r.host_id } : null,
       member: r.target_id ? { id: r.target_id, name: r.target_name, banned: !!r.target_banned } : null
     }))

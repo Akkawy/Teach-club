@@ -5,6 +5,8 @@ import { api } from '../api.js';
 import { app, navigate, render, pendingInvite } from '../core.js';
 import { t, tp } from '../i18n.js';
 import { avatar, icon, bottomNav, toast, busy, showError, langToggle, brand } from '../ui.js';
+import { withFollow } from '../follow.js';
+import { mediaReport, mediaButtons, mediaActions } from './social.js';
 
 const inviteUrl = (code) => `${location.origin}/join/${code}`;
 
@@ -120,7 +122,7 @@ function memberRow(s, m) {
   const admin = m.role === 'admin';
   return html`<li class="card member-row">
     <a href="/u/${m.user.id}" class="member-main">
-      ${avatar(m.user, 44, { font: 15 })}
+      ${withFollow(m.user, avatar(m.user, 44, { font: 15 }), 44)}
       <span class="grow stack-2 min0">
         <span class="row gap-6 wrap"><strong><bdi>${m.user.name}</bdi></strong>${isMe ? html`<span class="small muted">${t('club.youTag')}</span>` : ''}${admin ? html`<span class="tag">${t('club.admin')}</span>` : ''}</span>
         ${m.user.bio ? html`<span class="small muted clamp-2" dir="auto">${m.user.bio}</span>` : ''}
@@ -138,11 +140,13 @@ function reportCard(r) {
     <strong>${t(`report.reasons.${r.reason}`)}</strong>
     ${r.lesson ? html`<a href="/lesson/${r.lesson.id}" class="small">${t('club.reportOn', { title: r.lesson.title })}</a>` : ''}
     ${r.member ? html`<a href="/u/${r.member.id}" class="small">${t('club.reportOnMember', { name: r.member.name })}</a>` : ''}
+    ${mediaReport(r)}
     ${r.details ? html`<p class="body-3 pre-line" dir="auto">${r.details}</p>` : ''}
     ${r.reporter ? html`<span class="tiny muted">${t('club.reportBy', { name: r.reporter })}</span>` : ''}
     <div class="row gap-8 wrap">
       <button class="chip-btn" data-action="resolve" data-id="${r.id}">${icon('check', 16, 2.4)}${t('club.resolve')}</button>
       ${r.lesson ? html`<button class="chip-btn danger" data-action="deleteLesson" data-id="${r.lesson.id}" data-report="${r.id}">${icon('trash', 16)}${t('club.deleteLesson')}</button>` : ''}
+      ${mediaButtons(r)}
     </div>
   </li>`;
 }
@@ -219,6 +223,7 @@ export const club = {
 </div>`;
   },
   actions: {
+    ...mediaActions('/club'),
     async copy(s) {
       try {
         await navigator.clipboard.writeText(inviteUrl(s.club.inviteCode));

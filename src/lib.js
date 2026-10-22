@@ -68,7 +68,13 @@ const AR = {
   "That map link doesn't look right.": 'رابط الخريطة لا يبدو صحيحًا.',
   "You can't follow yourself.": 'لا يمكنك متابعة نفسك.',
   "You can't do that to yourself.": 'لا يمكنك فعل ذلك مع نفسك.',
-  'That lesson is full. You are on the waitlist.': 'الدرس ممتلئ. أنت على قائمة الانتظار.'
+  'That lesson is full. You are on the waitlist.': 'الدرس ممتلئ. أنت على قائمة الانتظار.',
+  "That doesn't look like a video link.": 'هذا لا يبدو رابط فيديو.',
+  "We couldn't find that video. It may have been removed.": 'لم نجد هذا الفيديو. ربما تمت إزالته.',
+  'New accounts can share videos after 3 days.': 'يمكن للحسابات الجديدة مشاركة الفيديوهات بعد 3 أيام.',
+  'Only the person who shared it can remove this.': 'يمكن لمن شاركه فقط إزالته.',
+  'Only the person who wrote it can remove this.': 'يمكن لكاتبه فقط إزالته.',
+  "It's your video, so you're already in!": 'إنه فيديوك، فأنت حاضر بالفعل!'
 };
 
 const AR_FIELDS = {
@@ -76,7 +82,8 @@ const AR_FIELDS = {
   'Plan step': 'جزء الخطة', 'Plan hint': 'تلميح الخطة', 'Plan note': 'ملاحظة الخطة', Title: 'العنوان', Pitch: 'الوصف',
   'Prep note': 'ملاحظة التحضير', 'Class link': 'رابط الدرس', 'Club name': 'اسم النادي', Wish: 'الأمنية', Details: 'التفاصيل',
   Question: 'السؤال', Reply: 'الرد', Recap: 'الملخّص', 'Report details': 'تفاصيل البلاغ',
-  Place: 'المكان', Area: 'المنطقة', 'Material title': 'عنوان المادة', 'Material link': 'رابط المادة', 'Teacher notes': 'ملاحظات المقدّم'
+  Place: 'المكان', Area: 'المنطقة', 'Material title': 'عنوان المادة', 'Material link': 'رابط المادة', 'Teacher notes': 'ملاحظات المقدّم',
+  Caption: 'الوصف', Comment: 'التعليق'
 };
 
 export function messageFor(err, request) {
@@ -259,7 +266,7 @@ export function unb64(str) {
 const SESSION_COOKIE = 'tc_session';
 const SESSION_DAYS = 30;
 
-export const USER_COLS = 'id, name, email, bio, photo_v, created_at, (photo IS NOT NULL) AS has_photo, current_club_id, lang, tz, email_reminders, interests, approve_followers, banned';
+export const USER_COLS = 'id, name, email, bio, photo_v, created_at, (photo IS NOT NULL) AS has_photo, current_club_id, lang, tz, email_reminders, interests, approve_followers, banned, notify_off';
 
 export function readCookie(request) {
   for (const part of (request.headers.get('cookie') || '').split(';')) {
@@ -326,7 +333,7 @@ export function publicUser(u) {
 export function selfUser(u) {
   return {
     ...publicUser(u), email: u.email, lang: u.lang, tz: u.tz, emailReminders: !!u.email_reminders,
-    interests: parseJson(u.interests, []), approveFollowers: !!u.approve_followers
+    interests: parseJson(u.interests, []), approveFollowers: !!u.approve_followers, notifyOff: parseJson(u.notify_off, [])
   };
 }
 
